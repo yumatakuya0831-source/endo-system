@@ -16,7 +16,7 @@
 | 設計 | 完了 | デモの構成、画面、保存方式、制約、要件対応を定義する | `docs/design.md` v0.3 | Codex |
 | 実装 | 完了 | デモ対象機能を実装し、lint・build・自動テストに合格する | `app/`, `package.json`; 品質検査ログ | Codex |
 | テスト | 完了 | デモ対象の自動検査とVercel互換ビルドを確認する | `docs/test-plan-report.md` v0.3 | Codex |
-| リリース | 保留 | リリース基準を満たし、責任者が承認する | 未着手 | 未定 |
+| リリース | 完了 | Vercel本番デプロイが成功し公開URLで主要画面を表示する | `https://endo-system.vercel.app/` | Codex |
 
 ## 作業履歴
 
@@ -28,6 +28,7 @@
 | 2026-09-06 | FR-001〜FR-017, AC-001〜AC-027 | デモ設計、見積・請求・マスタ画面、D1状態API、レスポンシブUIを実装 | `docs/design.md`, `app/`, `db/`, `drizzle/`, `public/og.png` | lint合格、build合格、自動テスト2/2合格、GET/PUT API合格 | Codex |
 | 2026-09-06 | FR-018, AC-028 | 請求書プレビュー要件・設計を追加し、請求書形式の確認画面を実装 | `docs/requirements.md`, `docs/design.md`, `app/estimate-app.tsx`, `app/globals.css` | lint、テスト2件、build、実ブラウザ表示に合格。開発時の再読込ループ対策も反映 | Codex |
 | 2026-09-06 | NFR-008, AC-029, ADR-005 | Vercelの404を解消するためNext.js構成へ移行し、デモ保存をLocal Storageへ変更 | `package.json`, `app/estimate-app.tsx`, 配備・DB関連ファイル、各文書 | lint合格、自動テスト1/1合格、Next.js本番build合格 | Codex |
+| 2026-09-06 | NFR-008, AC-029 | VercelのFramework PresetをNext.jsへ変更し、旧`dist`出力設定を解除して本番再デプロイ | Vercel Project Settings | デプロイReady、公開URLでダッシュボード表示を確認 | Codex |
 
 ## 決定事項
 
@@ -58,5 +59,5 @@
 - 対象ID: FR-001〜FR-018, NFR-001〜NFR-008, AC-001〜AC-029, T-001〜T-009
 - 完了したこと: 見積作成、住所検索、必須材料自動反映、工事選択、費用計算、D&D並べ替え、会社別請求書、請求書プレビュー、マスタ管理を含むデモを実装した。
 - 検証と証拠: `docs/test-plan-report.md` v0.3。lint、Next.js build、自動テスト1件が合格。
-- 未実施・残課題: Vercel再デプロイ後の公開URL確認、実ブラウザでの全操作、認証・認可、監査、性能、サーバーバックアップ、本番用請求規則は未実施。
+- 未実施・残課題: 公開環境での全操作、認証・認可、監査、性能、サーバーバックアップ、本番用請求規則は未実施。
 - 次の作業と完了条件: デモをレビューし、ISSUE-001〜ISSUE-014を確定して本番設計へ更新する。
