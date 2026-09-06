@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import {
-  type AppState, type Estimate, type EstimateItem, type EstimatePlace,
+  type AppState, type Estimate, type EstimateItem, type EstimatePlace, type Invoice,
   createId, estimateTotals, initialState, itemLabor, itemMaterial, itemTotal, money,
 } from "./lib/domain";
 
-type View = "dashboard" | "estimates" | "editor" | "invoices" | "masters";
+type View = "dashboard" | "estimates" | "editor" | "invoices" | "invoicePreview" | "masters";
 const today = () => new Date().toISOString().slice(0, 10);
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -23,6 +23,7 @@ export default function EstimateApp() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [masterTab, setMasterTab] = useState("顧客マスタ");
+  const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
 
   useEffect(() => {
     fetch("/api/state").then((r) => r.json()).then((data) => {
@@ -74,6 +75,11 @@ export default function EstimateApp() {
     setView("invoices");
   };
 
+  const openInvoicePreview = (invoice: Invoice) => {
+    setPreviewInvoice(invoice);
+    setView("invoicePreview");
+  };
+
   const totalEstimateValue = state.estimates.reduce((sum, e) => sum + estimateTotals(e).total, 0);
   const navigation: { id: View; label: string; icon: string }[] = [
     { id: "dashboard", label: "ダッシュボード", icon: "home" }, { id: "estimates", label: "見積書", icon: "estimate" },
@@ -83,17 +89,18 @@ export default function EstimateApp() {
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">積</div><div><strong>積算ノート</strong><small>ESTIMATE STUDIO</small></div></div>
-      <nav>{navigation.map((item) => <button key={item.id} className={view === item.id || (view === "editor" && item.id === "estimates") ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} />{item.label}</button>)}</nav>
+      <nav>{navigation.map((item) => <button key={item.id} className={view === item.id || (view === "editor" && item.id === "estimates") || (view === "invoicePreview" && item.id === "invoices") ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} />{item.label}</button>)}</nav>
       <div className="sidebar-bottom"><span className="avatar">遠</span><div><strong>遠藤 太郎</strong><small>管理者</small></div><button aria-label="設定">•••</button></div>
     </aside>
 
     <main>
-      <header className="topbar"><div><span className="crumb">積算ノート</span><span className="slash">/</span><strong>{view === "editor" ? editing?.estimateNo : navigation.find((n) => n.id === view)?.label}</strong></div><span className="demo-pill">● デモ環境</span></header>
+      <header className="topbar"><div><span className="crumb">積算ノート</span><span className="slash">/</span><strong>{view === "editor" ? editing?.estimateNo : view === "invoicePreview" ? previewInvoice?.invoiceNo : navigation.find((n) => n.id === view)?.label}</strong></div><span className="demo-pill">● デモ環境</span></header>
       {loading ? <div className="loading">データを準備しています…</div> : <div className="content">
         {view === "dashboard" && <Dashboard state={state} total={totalEstimateValue} openEditor={openEditor} setView={setView} />}
         {view === "estimates" && <EstimateList estimates={state.estimates} query={query} setQuery={setQuery} openEditor={openEditor} createInvoice={createInvoice} />}
         {view === "editor" && editing && <EstimateEditor state={state} estimate={editing} setEstimate={setEditing} save={saveEstimate} back={() => setView("estimates")} />}
-        {view === "invoices" && <InvoiceList state={state} persist={persist} />}
+        {view === "invoices" && <InvoiceList state={state} persist={persist} onPreview={openInvoicePreview} />}
+        {view === "invoicePreview" && previewInvoice && <InvoicePreview invoice={previewInvoice} company={state.companies[0]} back={() => setView("invoices")} />}
         {view === "masters" && <MasterPanel state={state} persist={persist} tab={masterTab} setTab={setMasterTab} />}
       </div>}
     </main>
@@ -172,10 +179,22 @@ function EstimateRow({ item, index, placeId, move, updateItem, remove }: { item:
   </div>;
 }
 
-function InvoiceList({ state, persist }: { state: AppState; persist: (s: AppState, m: string) => void }) {
+function InvoiceList({ state, persist, onPreview }: { state: AppState; persist: (s: AppState, m: string) => void; onPreview: (invoice: Invoice) => void }) {
   const groups = Object.entries(state.invoices.reduce<Record<string, typeof state.invoices>>((acc, invoice) => { (acc[invoice.companyName] ??= []).push(invoice); return acc; }, {}));
   return <><div className="page-heading"><div><p className="eyebrow">INVOICES</p><h1>請求書</h1><p>見積書から作成した請求書を会社別に確認できます。</p></div></div>
-    {groups.length === 0 ? <section className="panel empty-state"><div className="big-icon">▧</div><h2>請求書はまだありません</h2><p>見積書一覧の「請求書作成」から作成できます。</p></section> : groups.map(([company, invoices]) => <section className="panel invoice-group" key={company}><div className="panel-head"><div><h2>{company}</h2><p>{invoices.length}件の請求書</p></div><strong>{money(invoices.reduce((s, i) => s + i.amount, 0))}</strong></div><div className="table-wrap"><table><thead><tr><th>請求番号</th><th>工事件名</th><th>元見積</th><th>請求日</th><th>支払期限</th><th>金額</th><th>状態</th></tr></thead><tbody>{invoices.map((i) => <tr key={i.id}><td className="link">{i.invoiceNo}</td><td><strong>{i.projectName}</strong></td><td>{i.estimateNo}</td><td><input type="date" value={i.issueDate} onChange={(e) => persist({ ...state, invoices: state.invoices.map((x) => x.id === i.id ? { ...x, issueDate: e.target.value } : x) }, "請求日を保存しました")} /></td><td>{i.dueDate}</td><td className="right"><strong>{money(i.amount)}</strong></td><td><button className={`status ${i.status}`} onClick={() => persist({ ...state, invoices: state.invoices.map((x) => x.id === i.id ? { ...x, status: x.status === "draft" ? "issued" : "draft" } : x) }, "請求書の状態を更新しました")}>{i.status === "issued" ? "発行済み" : "下書き"}</button></td></tr>)}</tbody></table></div></section>)}</>;
+    {groups.length === 0 ? <section className="panel empty-state"><div className="big-icon">▧</div><h2>請求書はまだありません</h2><p>見積書一覧の「請求書作成」から作成できます。</p></section> : groups.map(([company, invoices]) => <section className="panel invoice-group" key={company}><div className="panel-head"><div><h2>{company}</h2><p>{invoices.length}件の請求書</p></div><strong>{money(invoices.reduce((s, i) => s + i.amount, 0))}</strong></div><div className="table-wrap"><table><thead><tr><th>請求番号</th><th>工事件名</th><th>元見積</th><th>請求日</th><th>支払期限</th><th>金額</th><th>状態</th><th></th></tr></thead><tbody>{invoices.map((i) => <tr key={i.id}><td><button className="link" onClick={() => onPreview(i)}>{i.invoiceNo}</button></td><td><strong>{i.projectName}</strong></td><td>{i.estimateNo}</td><td><input type="date" value={i.issueDate} onChange={(e) => persist({ ...state, invoices: state.invoices.map((x) => x.id === i.id ? { ...x, issueDate: e.target.value } : x) }, "請求日を保存しました")} /></td><td>{i.dueDate}</td><td className="right"><strong>{money(i.amount)}</strong></td><td><button className={`status ${i.status}`} onClick={() => persist({ ...state, invoices: state.invoices.map((x) => x.id === i.id ? { ...x, status: x.status === "draft" ? "issued" : "draft" } : x) }, "請求書の状態を更新しました")}>{i.status === "issued" ? "発行済み" : "下書き"}</button></td><td><button className="outline small" onClick={() => onPreview(i)}>プレビュー</button></td></tr>)}</tbody></table></div></section>)}</>;
+}
+
+function InvoicePreview({ invoice, company, back }: { invoice: Invoice; company?: AppState["companies"][number]; back: () => void }) {
+  return <><div className="preview-toolbar"><button className="outline" onClick={back}><Icon name="back" />請求書一覧へ</button><div><span className={`status ${invoice.status}`}>{invoice.status === "issued" ? "発行済み" : "下書き"}</span><button className="primary" onClick={() => window.print()}>印刷する</button></div></div>
+    <article className="invoice-preview" aria-label="請求書プレビュー">
+      <div className="invoice-top"><div><p className="invoice-label">INVOICE</p><h1>請 求 書</h1></div><div className="issuer"><strong>{company?.name ?? "会社名未設定"}</strong><p>〒{company?.postalCode}<br />{company?.address}</p><p>TEL {company?.phone}</p></div></div>
+      <div className="invoice-meta"><div className="recipient"><h2>{invoice.companyName} 御中</h2><p>下記の通りご請求申し上げます。</p></div><dl><div><dt>請求書番号</dt><dd>{invoice.invoiceNo}</dd></div><div><dt>請求日</dt><dd>{invoice.issueDate}</dd></div><div><dt>支払期限</dt><dd>{invoice.dueDate}</dd></div><div><dt>元見積番号</dt><dd>{invoice.estimateNo}</dd></div></dl></div>
+      <div className="invoice-project"><span>件名</span><strong>{invoice.projectName}</strong></div>
+      <div className="invoice-total"><span>ご請求金額（税別）</span><strong>{money(invoice.amount)}</strong></div>
+      <table className="invoice-lines"><thead><tr><th>No.</th><th>品名・工事内容</th><th>数量</th><th>単位</th><th>金額</th></tr></thead><tbody>{invoice.items.map((item, index) => <tr key={`${item.name}-${index}`}><td>{index + 1}</td><td>{item.name}</td><td className="right">{item.quantity}</td><td>{item.unit}</td><td className="right">{money(item.amount)}</td></tr>)}</tbody><tfoot><tr><td colSpan={4}>合計</td><td className="right">{money(invoice.amount)}</td></tr></tfoot></table>
+      <div className="invoice-notes"><strong>備考</strong><p>お振込手数料は貴社にてご負担くださいますようお願いいたします。</p><p className="demo-note">※ デモ表示：税・振込先・登録番号は本番仕様確定後に反映します。</p></div>
+    </article></>;
 }
 
 function MasterPanel({ state, persist, tab, setTab }: { state: AppState; persist: (s: AppState, m: string) => void; tab: string; setTab: (t: string) => void }) {

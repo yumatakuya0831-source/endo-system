@@ -50,6 +50,8 @@ test("includes the required demo workflows", async () => {
   assert.match(app, /dataTransfer\.setData/);
   assert.match(app, /createInvoice/);
   assert.match(app, /請求書を作成しました/);
+  assert.match(app, /aria-label="請求書プレビュー"/);
+  assert.match(app, /ご請求金額（税別）/);
   assert.match(domain, /itemMaterial.*item\.quantity \* item\.materialCost/);
   assert.match(domain, /itemLabor.*item\.quantity \* item\.laborCost/);
   assert.match(api, /ON CONFLICT\(key\) DO UPDATE/);
