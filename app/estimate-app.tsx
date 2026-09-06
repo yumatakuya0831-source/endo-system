@@ -9,6 +9,7 @@ import {
 type View = "dashboard" | "estimates" | "editor" | "invoices" | "invoicePreview" | "masters";
 const today = () => new Date().toISOString().slice(0, 10);
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+const storageKey = "endo-estimate-demo-state-v1";
 
 function Icon({ name }: { name: string }) {
   const icons: Record<string, string> = { home: "⌂", estimate: "▤", invoice: "▧", master: "◇", plus: "+", search: "⌕", grip: "⠿", save: "✓", back: "‹", arrow: "→" };
@@ -26,17 +27,23 @@ export default function EstimateApp() {
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
 
   useEffect(() => {
-    fetch("/api/state").then((r) => r.json()).then((data) => {
-      if (data.state) setState(data.state);
-    }).catch(() => setNotice("初期データでデモを開始しました")).finally(() => setLoading(false));
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(storageKey);
+        if (saved) setState(JSON.parse(saved) as AppState);
+      } catch {
+        setNotice("保存データを読み込めなかったため、初期データで開始しました");
+      } finally {
+        setLoading(false);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
-  const persist = async (next: AppState, message: string) => {
+  const persist = (next: AppState, message: string) => {
     setState(next);
-    setNotice("保存しています…");
     try {
-      const response = await fetch("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ state: next }) });
-      if (!response.ok) throw new Error();
+      window.localStorage.setItem(storageKey, JSON.stringify(next));
       setNotice(message);
     } catch { setNotice("保存できませんでした。もう一度お試しください"); }
     window.setTimeout(() => setNotice(""), 2600);
