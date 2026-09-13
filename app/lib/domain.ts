@@ -6,13 +6,16 @@ export type PlaceTemplate = { id: string; name: string; materials: MaterialTempl
 export type EstimateItem = { id: string; sourceId?: string; type: "material" | "work" | "manual"; name: string; specification: string; quantity: number; unit: string; materialCost: number; laborCost: number; sortOrder: number; required?: boolean };
 export type EstimatePlace = { id: string; name: string; items: EstimateItem[] };
 export type Estimate = { id: string; estimateNo: string; customerId: string; customerName: string; customerAddress: string; projectName: string; siteAddress: string; status: "draft" | "completed"; createdAt: string; updatedAt: string; places: EstimatePlace[] };
-export type Invoice = { id: string; invoiceNo: string; estimateId: string; estimateNo: string; customerId: string; companyName: string; projectName: string; issueDate: string; dueDate: string; amount: number; status: "draft" | "issued"; items: { name: string; quantity: number; unit: string; amount: number }[] };
-export type AppState = { companies: Company[]; customers: Customer[]; workItems: WorkItem[]; placeTemplates: PlaceTemplate[]; estimates: Estimate[]; invoices: Invoice[] };
+export type InvoiceItem = { name: string; quantity: number; unit: string; amount: number };
+export type Invoice = { id: string; invoiceNo: string; estimateId: string; estimateNo: string; showEstimateNo?: boolean; customerId: string; companyName: string; projectName: string; issueDate: string; dueDate: string; amount: number; status: "draft" | "issued"; items: InvoiceItem[] };
+export type AppSettings = { paymentDueDays: number; profitRate: number };
+export type AppState = { companies: Company[]; customers: Customer[]; workItems: WorkItem[]; placeTemplates: PlaceTemplate[]; estimates: Estimate[]; invoices: Invoice[]; settings: AppSettings };
 
 export const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(Math.round(value));
 export const itemMaterial = (item: EstimateItem) => item.quantity * item.materialCost;
 export const itemLabor = (item: EstimateItem) => item.quantity * item.laborCost;
 export const itemTotal = (item: EstimateItem) => itemMaterial(item) + itemLabor(item);
+export const invoiceTotal = (invoice: Invoice) => invoice.items.reduce((sum, item) => sum + item.amount, 0);
 export const estimateTotals = (estimate: Estimate) => {
   const items = estimate.places.flatMap((place) => place.items);
   const material = items.reduce((sum, item) => sum + itemMaterial(item), 0);
@@ -22,6 +25,7 @@ export const estimateTotals = (estimate: Estimate) => {
 export const createId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 
 export const initialState: AppState = {
+  settings: { paymentDueDays: 30, profitRate: 20 },
   companies: [{ id: "co-1", name: "遠藤設備株式会社", postalCode: "100-0005", address: "東京都千代田区丸の内1-1-1", phone: "03-1234-5678" }],
   customers: [
     { id: "cu-1", name: "青葉不動産株式会社", address: "東京都世田谷区桜丘2-8-12", contact: "施設管理部 佐藤様" },

@@ -10,9 +10,11 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern .next",
+    "supabase:verify": "node scripts/verify-supabase-data.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6"
