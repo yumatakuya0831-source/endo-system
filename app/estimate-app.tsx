@@ -508,6 +508,67 @@ function InvoicePreview({ invoice, company, back }: { invoice: Invoice; company?
     </article></>;
 }
 
+type CsvRow = Record<string, string>;
+
+const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/[\s_\-ー・（）()]/g, "");
+const pickValue = (row: CsvRow, keys: string[]) => {
+  const normalizedKeys = keys.map(normalizeHeader);
+  const match = Object.entries(row).find(([key]) => normalizedKeys.includes(normalizeHeader(key)));
+  return match?.[1]?.trim() ?? "";
+};
+const parseCsvNumber = (value: string) => Number(value.replace(/[^\d.-]/g, "")) || 0;
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === "\"" && quoted && next === "\"") {
+      field += "\"";
+      index += 1;
+      continue;
+    }
+    if (char === "\"") {
+      quoted = !quoted;
+      continue;
+    }
+    if (char === "," && !quoted) {
+      row.push(field.trim());
+      field = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(field.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      field = "";
+      continue;
+    }
+    field += char;
+  }
+
+  row.push(field.trim());
+  if (row.some(Boolean)) rows.push(row);
+  if (rows.length === 0) return [];
+
+  const headers = rows[0];
+  const hasHeader = headers.some((header) => /会社|顧客|住所|担当|工事|項目|単位|材料|労務|name|address|contact|category|unit|cost/i.test(header));
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  const fallbackHeaders = headers.map((_, index) => `col${index + 1}`);
+  const activeHeaders = hasHeader ? headers : fallbackHeaders;
+
+  return dataRows.map((values) => activeHeaders.reduce<CsvRow>((record, header, index) => {
+    record[header] = values[index] ?? "";
+    return record;
+  }, {}));
+}
+
 function MasterPanel({ state, persist, tab, setTab, session }: { state: AppState; persist: (s: AppState, m: string) => void; tab: string; setTab: (t: string) => void; session: Session | null }) {
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
@@ -515,7 +576,7 @@ function MasterPanel({ state, persist, tab, setTab, session }: { state: AppState
   const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
   const currentEmail = session?.user.email?.toLowerCase() ?? "";
   const canManageUsers = session?.user.app_metadata?.role === "admin" || adminEmails.includes(currentEmail);
-  const tabs = ["会社マスタ", "顧客マスタ", "工事マスタ", "汎用マスタ", "設定", ...(canManageUsers ? ["ユーザー管理"] : [])];
+  const tabs = ["会社マスタ", "顧客マスタ", "工事マスタ", "汎用マスタ", "データ取込", "設定", ...(canManageUsers ? ["ユーザー管理"] : [])];
   const addCompany = () => { const company = { id: createId("co"), name: "新規会社", postalCode: "000-0000", address: "東京都", phone: "00-0000-0000" }; persist({ ...state, companies: [...state.companies, company] }, "会社を追加しました"); setEditingCompanyId(company.id); };
   const addCustomer = () => { const customer = { id: createId("cu"), name: "新規顧客株式会社", address: "東京都", contact: "ご担当者様" }; persist({ ...state, customers: [...state.customers, customer] }, "顧客を追加しました"); setEditingCustomerId(customer.id); };
   const addWork = () => { const work = { id: createId("wo"), category: "トイレ工事", name: "新規工事項目", unit: "式", materialCost: 0, laborCost: 0 }; persist({ ...state, workItems: [...state.workItems, work] }, "工事項目を追加しました"); setEditingWorkId(work.id); };
@@ -529,14 +590,126 @@ function MasterPanel({ state, persist, tab, setTab, session }: { state: AppState
     if (tab === "ユーザー管理" && !canManageUsers) setTab("会社マスタ");
   }, [canManageUsers, setTab, tab]);
   return <><div className="page-heading"><div><p className="eyebrow">MASTER DATA</p><h1>マスタ管理</h1><p>見積・請求で使う基本データを管理します。</p></div></div><div className="master-tabs">{tabs.map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}</div>
-    <section className="panel"><div className="panel-head"><div><h2>{tab}</h2><p>{tab === "汎用マスタ" ? "場所と必須材料" : tab === "ユーザー管理" ? "ログインできるユーザー" : tab === "設定" ? "請求書の既定値" : "登録済みデータ"}</p></div>{tab === "会社マスタ" && <button className="primary small" onClick={addCompany}>＋ 会社を追加</button>}{tab === "顧客マスタ" && <button className="primary small" onClick={addCustomer}>＋ 顧客を追加</button>}{tab === "工事マスタ" && <button className="primary small" onClick={addWork}>＋ 工事を追加</button>}</div>
+    <section className="panel"><div className="panel-head"><div><h2>{tab}</h2><p>{tab === "汎用マスタ" ? "場所と必須材料" : tab === "ユーザー管理" ? "ログインできるユーザー" : tab === "設定" ? "請求書の既定値" : tab === "データ取込" ? "CSV / PDFからマスタへ追加" : "登録済みデータ"}</p></div>{tab === "会社マスタ" && <button className="primary small" onClick={addCompany}>＋ 会社を追加</button>}{tab === "顧客マスタ" && <button className="primary small" onClick={addCustomer}>＋ 顧客を追加</button>}{tab === "工事マスタ" && <button className="primary small" onClick={addWork}>＋ 工事を追加</button>}</div>
       {tab === "会社マスタ" && <div className="table-wrap"><table><thead><tr><th>会社名</th><th>郵便番号</th><th>住所</th><th>電話番号</th><th></th></tr></thead><tbody>{state.companies.map((company) => { const isEditing = editingCompanyId === company.id; return <tr className={isEditing ? "editing-row" : ""} key={company.id}><td>{isEditing ? <input className="master-input" value={company.name} onChange={(event) => updateCompany(company.id, { name: event.target.value })} /> : <strong>{company.name}</strong>}</td><td>{isEditing ? <input className="master-input compact" value={company.postalCode} onChange={(event) => updateCompany(company.id, { postalCode: event.target.value })} /> : company.postalCode}</td><td>{isEditing ? <input className="master-input" value={company.address} onChange={(event) => updateCompany(company.id, { address: event.target.value })} /> : company.address}</td><td>{isEditing ? <input className="master-input compact" value={company.phone} onChange={(event) => updateCompany(company.id, { phone: event.target.value })} /> : company.phone}</td><td><div className="action-group">{isEditing ? <button className="primary small" onClick={() => setEditingCompanyId(null)}>編集中・完了</button> : <button className="outline small" onClick={() => setEditingCompanyId(company.id)}>編集</button>}<button className="outline small danger-button" onClick={() => deleteCompany(company.id, company.name)}>削除</button></div></td></tr>; })}</tbody></table>{state.companies.length === 0 && <div className="empty">会社はまだありません</div>}</div>}
       {tab === "顧客マスタ" && <div className="table-wrap"><table><thead><tr><th>会社名</th><th>住所</th><th>担当</th><th></th></tr></thead><tbody>{state.customers.map((customer) => { const isEditing = editingCustomerId === customer.id; return <tr className={isEditing ? "editing-row" : ""} key={customer.id}><td>{isEditing ? <input className="master-input" value={customer.name} onChange={(event) => updateCustomer(customer.id, { name: event.target.value })} /> : <strong>{customer.name}</strong>}</td><td>{isEditing ? <input className="master-input" value={customer.address} onChange={(event) => updateCustomer(customer.id, { address: event.target.value })} /> : customer.address}</td><td>{isEditing ? <input className="master-input" value={customer.contact} onChange={(event) => updateCustomer(customer.id, { contact: event.target.value })} /> : customer.contact}</td><td><div className="action-group">{isEditing ? <button className="primary small" onClick={() => setEditingCustomerId(null)}>編集中・完了</button> : <button className="outline small" onClick={() => setEditingCustomerId(customer.id)}>編集</button>}<button className="outline small danger-button" onClick={() => deleteCustomer(customer.id, customer.name)}>削除</button></div></td></tr>; })}</tbody></table>{state.customers.length === 0 && <div className="empty">顧客はまだありません</div>}</div>}
       {tab === "工事マスタ" && <div className="table-wrap"><table><thead><tr><th>工事区分</th><th>工事項目</th><th>単位</th><th>材料費</th><th>労務費</th><th></th></tr></thead><tbody>{state.workItems.map((work) => { const isEditing = editingWorkId === work.id; return <tr className={isEditing ? "editing-row" : ""} key={work.id}><td>{isEditing ? <input className="master-input compact" value={work.category} onChange={(event) => updateWork(work.id, { category: event.target.value })} /> : <span className="category">{work.category}</span>}</td><td>{isEditing ? <input className="master-input" value={work.name} onChange={(event) => updateWork(work.id, { name: event.target.value })} /> : <strong>{work.name}</strong>}</td><td>{isEditing ? <input className="master-input compact" value={work.unit} onChange={(event) => updateWork(work.id, { unit: event.target.value })} /> : work.unit}</td><td>{isEditing ? <CalculatorInput className="master-input compact" value={work.materialCost} onChange={(materialCost) => updateWork(work.id, { materialCost })} label="材料費" /> : money(work.materialCost)}</td><td>{isEditing ? <CalculatorInput className="master-input compact" value={work.laborCost} onChange={(laborCost) => updateWork(work.id, { laborCost })} label="労務費" /> : money(work.laborCost)}</td><td><div className="action-group">{isEditing ? <button className="primary small" onClick={() => setEditingWorkId(null)}>編集中・完了</button> : <button className="outline small" onClick={() => setEditingWorkId(work.id)}>編集</button>}<button className="outline small danger-button" onClick={() => deleteWork(work.id, work.name)}>削除</button></div></td></tr>; })}</tbody></table>{state.workItems.length === 0 && <div className="empty">工事項目はまだありません</div>}</div>}
       {tab === "汎用マスタ" && <PlaceTemplateManager state={state} persist={persist} />}
+      {tab === "データ取込" && <DataImportPanel state={state} persist={persist} />}
       {tab === "設定" && <SettingsPanel state={state} persist={persist} />}
       {tab === "ユーザー管理" && <UserRegistrationPanel />}
     </section></>;
+}
+
+function DataImportPanel({ state, persist }: { state: AppState; persist: (s: AppState, m: string) => void }) {
+  const [target, setTarget] = useState<"customers" | "workItems">("customers");
+  const [fileName, setFileName] = useState("");
+  const [message, setMessage] = useState("");
+  const [customers, setCustomers] = useState<AppState["customers"]>([]);
+  const [workItems, setWorkItems] = useState<AppState["workItems"]>([]);
+
+  const parseRows = (rows: CsvRow[]) => {
+    if (target === "customers") {
+      const nextCustomers = rows.map((row) => ({
+        id: createId("cu"),
+        name: pickValue(row, ["会社名", "顧客名", "顧客会社名", "取引先名", "name", "customer", "col1"]),
+        address: pickValue(row, ["住所", "所在地", "address", "col2"]),
+        contact: pickValue(row, ["担当", "担当者", "担当者名", "contact", "person", "col3"]),
+      })).filter((customer) => customer.name).map((customer, index) => ({
+        ...customer,
+        contact: customer.contact || `取込データ ${index + 1}`,
+      }));
+      setCustomers(nextCustomers);
+      setWorkItems([]);
+      setMessage(nextCustomers.length > 0 ? `${nextCustomers.length}件の顧客データを読み込みました。内容を確認して保存してください。` : "顧客名として使える列が見つかりませんでした。");
+      return;
+    }
+
+    const nextWorkItems = rows.map((row) => ({
+      id: createId("wo"),
+      category: pickValue(row, ["工事区分", "分類", "カテゴリ", "category", "col1"]) || "未分類",
+      name: pickValue(row, ["工事項目", "工事名", "項目名", "名称", "name", "item", "col2"]),
+      unit: pickValue(row, ["単位", "unit", "col3"]) || "式",
+      materialCost: parseCsvNumber(pickValue(row, ["材料費", "材料単価", "材料", "materialCost", "material", "col4"])),
+      laborCost: parseCsvNumber(pickValue(row, ["労務費", "労務単価", "工賃", "laborCost", "labor", "col5"])),
+    })).filter((work) => work.name);
+    setCustomers([]);
+    setWorkItems(nextWorkItems);
+    setMessage(nextWorkItems.length > 0 ? `${nextWorkItems.length}件の工事データを読み込みました。内容を確認して保存してください。` : "工事項目として使える列が見つかりませんでした。");
+  };
+
+  const loadFile = async (file?: File) => {
+    if (!file) return;
+    setFileName(file.name);
+    setCustomers([]);
+    setWorkItems([]);
+
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      setMessage("PDFはファイル形式ごとに文字抽出方法が変わるため、現時点では自動取込の入口だけ用意しています。PDFの中身が分かり次第、列の読み取りルールを追加します。");
+      return;
+    }
+
+    const text = await file.text();
+    const rows = parseCsv(text);
+    parseRows(rows);
+  };
+
+  const saveImported = () => {
+    if (target === "customers") {
+      if (customers.length === 0) {
+        setMessage("保存できる顧客データがありません。");
+        return;
+      }
+      const merged = [...state.customers];
+      customers.forEach((customer) => {
+        const existingIndex = merged.findIndex((item) => item.name === customer.name);
+        if (existingIndex >= 0) {
+          merged[existingIndex] = { ...merged[existingIndex], address: customer.address, contact: customer.contact };
+        } else {
+          merged.push(customer);
+        }
+      });
+      persist({ ...state, customers: merged }, `${customers.length}件の顧客データを保存しました`);
+      setMessage(`${customers.length}件の顧客データを保存しました。同じ会社名は上書きしています。`);
+      return;
+    }
+
+    if (workItems.length === 0) {
+      setMessage("保存できる工事データがありません。");
+      return;
+    }
+    const merged = [...state.workItems];
+    workItems.forEach((work) => {
+      const existingIndex = merged.findIndex((item) => item.category === work.category && item.name === work.name);
+      if (existingIndex >= 0) {
+        merged[existingIndex] = { ...merged[existingIndex], unit: work.unit, materialCost: work.materialCost, laborCost: work.laborCost };
+      } else {
+        merged.push(work);
+      }
+    });
+    persist({ ...state, workItems: merged }, `${workItems.length}件の工事データを保存しました`);
+    setMessage(`${workItems.length}件の工事データを保存しました。同じ工事区分・項目名は上書きしています。`);
+  };
+
+  const activeRows = target === "customers" ? customers : workItems;
+
+  return <div className="import-panel">
+    <div className="import-controls">
+      <label>取り込み先<select value={target} onChange={(event) => {
+        setTarget(event.target.value as "customers" | "workItems");
+        setCustomers([]);
+        setWorkItems([]);
+        setMessage("");
+      }}><option value="customers">顧客マスタ</option><option value="workItems">工事マスタ</option></select></label>
+      <label>CSV / PDFファイル<input type="file" accept=".csv,text/csv,.pdf,application/pdf" onChange={(event) => { void loadFile(event.target.files?.[0]); }} /></label>
+      <button className="primary" onClick={saveImported} disabled={activeRows.length === 0}>データベースへ保存</button>
+    </div>
+    <p className="import-note">CSVは列名から自動判定します。顧客は「会社名・住所・担当」、工事は「工事区分・工事項目・単位・材料費・労務費」を優先して読み込みます。</p>
+    {fileName && <p className="import-file">選択中: {fileName}</p>}
+    {message && <p className="user-admin-message">{message}</p>}
+    {target === "customers" && customers.length > 0 && <div className="table-wrap"><table><thead><tr><th>会社名</th><th>住所</th><th>担当</th></tr></thead><tbody>{customers.map((customer) => <tr key={customer.id}><td><strong>{customer.name}</strong></td><td>{customer.address || "-"}</td><td>{customer.contact}</td></tr>)}</tbody></table></div>}
+    {target === "workItems" && workItems.length > 0 && <div className="table-wrap"><table><thead><tr><th>工事区分</th><th>工事項目</th><th>単位</th><th>材料費</th><th>労務費</th></tr></thead><tbody>{workItems.map((work) => <tr key={work.id}><td><span className="category">{work.category}</span></td><td><strong>{work.name}</strong></td><td>{work.unit}</td><td>{money(work.materialCost)}</td><td>{money(work.laborCost)}</td></tr>)}</tbody></table></div>}
+  </div>;
 }
 
 function PlaceTemplateManager({ state, persist }: { state: AppState; persist: (s: AppState, m: string) => void }) {
