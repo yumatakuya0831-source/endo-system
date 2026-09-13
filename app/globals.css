@@ -1357,6 +1357,20 @@ td small {
   line-height: 1.7;
 }
 
+.user-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 0 12px;
+}
+
+.user-list-head h3 {
+  margin: 0;
+  font-family: Georgia,"Yu Mincho",serif;
+  font-size: 16px;
+}
+
 .password-field {
   position: relative;
   display: block;

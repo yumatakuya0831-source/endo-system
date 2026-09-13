@@ -61,7 +61,10 @@ export default function EstimateApp() {
     if (!isSupabaseConfigured) return;
 
     const supabase = getSupabaseBrowserClient();
-    const shouldOpenRecovery = () => window.localStorage.getItem(passwordRecoveryKey) === "1" || isPasswordRecoveryUrl();
+    if (!isPasswordRecoveryUrl()) {
+      window.localStorage.removeItem(passwordRecoveryKey);
+    }
+    const shouldOpenRecovery = () => isPasswordRecoveryUrl();
     const markRecoveryIfNeeded = (nextSession: Session | null) => {
       if (nextSession && shouldOpenRecovery()) {
         setPasswordRecovery(true);
@@ -69,6 +72,8 @@ export default function EstimateApp() {
         if (window.location.search || window.location.hash) {
           window.history.replaceState(null, "", window.location.pathname);
         }
+      } else if (!shouldOpenRecovery()) {
+        window.localStorage.removeItem(passwordRecoveryKey);
       }
     };
     void supabase.auth.getSession().then(async ({ data }) => {
@@ -94,6 +99,9 @@ export default function EstimateApp() {
       if (event === "PASSWORD_RECOVERY" || shouldOpenRecovery()) {
         setPasswordRecovery(Boolean(nextSession));
         window.localStorage.setItem(passwordRecoveryKey, "1");
+      } else if (event === "SIGNED_IN") {
+        setPasswordRecovery(false);
+        window.localStorage.removeItem(passwordRecoveryKey);
       }
       if (!nextSession) setLoading(false);
     });
@@ -646,7 +654,8 @@ function UserRegistrationPanel() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [usersLoaded, setUsersLoaded] = useState(false);
   const [message, setMessage] = useState("");
   const [users, setUsers] = useState<AuthUser[]>([]);
 
@@ -675,6 +684,7 @@ function UserRegistrationPanel() {
 
   const loadUsers = useCallback(async () => {
     setLoadingUsers(true);
+    setUsersLoaded(false);
     const accessToken = await getAccessToken();
     if (!accessToken) {
       setMessage("ログイン状態を確認できませんでした。再ログインしてください。");
@@ -682,28 +692,34 @@ function UserRegistrationPanel() {
       return;
     }
 
-    let response = await fetch("/api/users", {
-      cache: "no-store",
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (response.status === 401) {
-      const retryToken = await getAccessToken();
-      if (retryToken) {
-        response = await fetch("/api/users", {
-          cache: "no-store",
-          headers: { Authorization: `Bearer ${retryToken}` },
-        });
+    try {
+      let response = await fetch("/api/users", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.status === 401) {
+        const retryToken = await getAccessToken();
+        if (retryToken) {
+          response = await fetch("/api/users", {
+            cache: "no-store",
+            headers: { Authorization: `Bearer ${retryToken}` },
+          });
+        }
       }
-    }
-    const result = await response.json();
-    if (!response.ok) {
-      setMessage(result.error ?? "ユーザー一覧を取得できませんでした。");
-      setLoadingUsers(false);
-      return;
-    }
 
-    setUsers(result.users ?? []);
-    setLoadingUsers(false);
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "ユーザー一覧を取得できませんでした。");
+        return;
+      }
+
+      setUsers(result.users ?? []);
+      setUsersLoaded(true);
+    } catch {
+      setMessage("ユーザー一覧を取得できませんでした。サーバー設定を確認してください。");
+    } finally {
+      setLoadingUsers(false);
+    }
   }, [getAccessToken]);
 
   useEffect(() => {
@@ -810,6 +826,6 @@ function UserRegistrationPanel() {
     {message && <p className="user-admin-message">{message}</p>}
     <p className="user-admin-note">登録したユーザーは、このメールアドレスと初期パスワードでログインできます。パスワードは8文字以上です。登録できるのは管理者だけです。</p>
     <div className="user-list-head"><h3>登録ユーザー一覧</h3><button className="outline small" onClick={loadUsers} disabled={loadingUsers}>{loadingUsers ? "読込中…" : "更新"}</button></div>
-    <div className="table-wrap"><table><thead><tr><th>メールアドレス</th><th>権限</th><th>確認状態</th><th>作成日</th><th>最終ログイン</th><th></th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td><strong>{user.email ?? "-"}</strong>{user.isBootstrapAdmin && <small>初期管理者</small>}</td><td><span className={`status ${user.isAdmin ? "issued" : "draft"}`}>{user.isAdmin ? "管理者" : "一般"}</span></td><td><span className={`status ${user.confirmedAt ? "completed" : "draft"}`}>{user.confirmedAt ? "確認済み" : "未確認"}</span></td><td>{formatDateTime(user.createdAt)}</td><td>{formatDateTime(user.lastSignInAt)}</td><td><div className="action-group"><button className="outline small" disabled={user.isBootstrapAdmin} onClick={() => setAdmin(user, !user.isAdmin)}>{user.isAdmin ? "一般にする" : "管理者にする"}</button><button className="outline small danger-button" disabled={user.isBootstrapAdmin} onClick={() => deleteUser(user)}>削除</button></div></td></tr>)}</tbody></table>{users.length === 0 && <div className="empty">{loadingUsers ? "ユーザー一覧を読み込んでいます" : "登録ユーザーはまだありません"}</div>}</div>
+    <div className="table-wrap"><table><thead><tr><th>メールアドレス</th><th>権限</th><th>確認状態</th><th>作成日</th><th>最終ログイン</th><th></th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td><strong>{user.email ?? "-"}</strong>{user.isBootstrapAdmin && <small>初期管理者</small>}</td><td><span className={`status ${user.isAdmin ? "issued" : "draft"}`}>{user.isAdmin ? "管理者" : "一般"}</span></td><td><span className={`status ${user.confirmedAt ? "completed" : "draft"}`}>{user.confirmedAt ? "確認済み" : "未確認"}</span></td><td>{formatDateTime(user.createdAt)}</td><td>{formatDateTime(user.lastSignInAt)}</td><td><div className="action-group"><button className="outline small" disabled={user.isBootstrapAdmin} onClick={() => setAdmin(user, !user.isAdmin)}>{user.isAdmin ? "一般にする" : "管理者にする"}</button><button className="outline small danger-button" disabled={user.isBootstrapAdmin} onClick={() => deleteUser(user)}>削除</button></div></td></tr>)}</tbody></table>{users.length === 0 && <div className="empty">{loadingUsers ? "ユーザー一覧を読み込んでいます" : usersLoaded ? "登録ユーザーはまだありません" : "ユーザー一覧を取得できませんでした。更新を押してください。"}</div>}</div>
   </div>;
 }
