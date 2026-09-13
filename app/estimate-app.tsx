@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   type AppState, type Estimate, type EstimateItem, type EstimatePlace, type Invoice,
@@ -247,7 +247,7 @@ export default function EstimateApp() {
         {view === "estimates" && <EstimateList estimates={state.estimates} query={query} setQuery={setQuery} openEditor={openEditor} completeEstimate={completeEstimate} deleteEstimate={deleteEstimate} />}
         {view === "editor" && editing && <EstimateEditor state={state} estimate={editing} setEstimate={setEditing} save={saveEstimate} back={() => setView("estimates")} />}
         {view === "invoices" && <InvoiceList state={state} persist={persist} onPreview={openInvoicePreview} />}
-        {view === "invoicePreview" && previewInvoice && <InvoicePreview state={state} invoice={state.invoices.find((invoice) => invoice.id === previewInvoice.id) ?? previewInvoice} company={state.companies[0]} persist={persist} back={() => setView("invoices")} />}
+        {view === "invoicePreview" && previewInvoice && <InvoicePreview invoice={state.invoices.find((invoice) => invoice.id === previewInvoice.id) ?? previewInvoice} company={state.companies[0]} back={() => setView("invoices")} />}
         {view === "masters" && <MasterPanel state={state} persist={persist} tab={masterTab} setTab={setMasterTab} session={session} />}
       </div>}
     </main>
@@ -487,7 +487,7 @@ function InvoiceList({ state, persist, onPreview }: { state: AppState; persist: 
       }} /></td><td><input type="date" value={i.dueDate} onChange={(e) => persist({ ...state, invoices: state.invoices.map((x) => x.id === i.id ? { ...x, dueDate: e.target.value } : x) }, "支払期限を保存しました")} /></td><td className="right"><strong>{money(invoiceTotal(i))}</strong></td><td><span className={`status ${i.status}`}>{i.status === "issued" ? "発行済み" : "下書き"}</span></td><td><div className="action-group"><button className="outline small" onClick={() => toggleInvoiceStatus(i)}>{i.status === "draft" ? "発行済みにする" : "下書きに戻す"}</button><button className="outline small" onClick={() => onPreview(i)}>プレビュー</button><button className="outline small danger-button" onClick={() => deleteInvoice(i)}>削除</button></div></td></tr>)}</tbody></table></div></section>)}</>;
 }
 
-function InvoicePreview({ state, invoice, company, persist, back }: { state: AppState; invoice: Invoice; company?: AppState["companies"][number]; persist: (s: AppState, m: string) => void; back: () => void }) {
+function InvoicePreview({ invoice, company, back }: { invoice: Invoice; company?: AppState["companies"][number]; back: () => void }) {
   const total = invoiceTotal(invoice);
   return <><div className="preview-toolbar"><button className="outline" onClick={back}><Icon name="back" />請求書一覧へ</button><div><span className={`status ${invoice.status}`}>{invoice.status === "issued" ? "発行済み" : "下書き"}</span><button className="primary" onClick={() => window.print()}>印刷する</button></div></div>
     <article className="invoice-preview" aria-label="請求書プレビュー">
@@ -604,9 +604,9 @@ function PlaceTemplateManager({ state, persist }: { state: AppState; persist: (s
         {isEditing ? <><div className="material-editor-list">
           {template.materials.map((material) => <div className="material-editor" key={material.id}>
             <label>材料名<input value={material.name} onChange={(event) => updateMaterial(template.id, material.id, { name: event.target.value })} /></label>
-            <label>数量<CalculatorInput value={material.quantity} onChange={(quantity) => updateMaterial(template.id, material.id, { quantity })} label="数量" /></label>
+            <div className="field-label"><span>数量</span><CalculatorInput value={material.quantity} onChange={(quantity) => updateMaterial(template.id, material.id, { quantity })} label="数量" /></div>
             <label>単位<input value={material.unit} onChange={(event) => updateMaterial(template.id, material.id, { unit: event.target.value })} /></label>
-            <label>材料費<CalculatorInput value={material.materialCost} onChange={(materialCost) => updateMaterial(template.id, material.id, { materialCost })} label="材料費" /></label>
+            <div className="field-label"><span>材料費</span><CalculatorInput value={material.materialCost} onChange={(materialCost) => updateMaterial(template.id, material.id, { materialCost })} label="材料費" /></div>
             <button className="outline small danger-button" onClick={() => deleteMaterial(template.id, material.id)}>削除</button>
           </div>)}
         </div><button className="outline small add-material" onClick={() => addMaterial(template.id)}>＋ 材料を追加</button></> : <ul>{template.materials.map((material) => <li key={material.id}><span>{material.name}</span><strong>{material.quantity}{material.unit} · {money(material.materialCost)}</strong></li>)}</ul>}
@@ -633,9 +633,9 @@ function SettingsPanel({ state, persist }: { state: AppState; persist: (s: AppSt
   };
 
   return <div className="settings-panel">
-    <label>支払期限<CalculatorInput value={state.settings.paymentDueDays} onChange={updateDueDays} label="支払期限" /></label>
+    <div className="field-label"><span>支払期限</span><CalculatorInput value={state.settings.paymentDueDays} onChange={updateDueDays} label="支払期限" /></div>
     <p>請求書を作成した日から何日後を支払期限にするかを設定します。</p>
-    <label>利益率（%）<CalculatorInput value={state.settings.profitRate} onChange={updateProfitRate} label="利益率" /></label>
+    <div className="field-label"><span>利益率（%）</span><CalculatorInput value={state.settings.profitRate} onChange={updateProfitRate} label="利益率" /></div>
     <p>請求総額に対して何%を利益として表示するかを設定します。</p>
   </div>;
 }
@@ -652,7 +652,7 @@ function UserRegistrationPanel() {
 
   const formatDateTime = (value?: string) => value ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "-";
 
-  const getAccessToken = async () => {
+  const getAccessToken = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
     const { data: sessionData } = await supabase.auth.getSession();
     const currentToken = sessionData.session?.access_token;
@@ -671,9 +671,9 @@ function UserRegistrationPanel() {
     await supabase.auth.signOut();
     setMessage("セッションが無効です。再ログインしてください。");
     return undefined;
-  };
+  }, []);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setLoadingUsers(true);
     const accessToken = await getAccessToken();
     if (!accessToken) {
@@ -704,11 +704,14 @@ function UserRegistrationPanel() {
 
     setUsers(result.users ?? []);
     setLoadingUsers(false);
-  };
+  }, [getAccessToken]);
 
   useEffect(() => {
-    void loadUsers();
-  }, []);
+    const timer = window.setTimeout(() => {
+      void loadUsers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadUsers]);
 
   const createUser = async (event: FormEvent) => {
     event.preventDefault();
