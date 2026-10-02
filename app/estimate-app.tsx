@@ -1,14 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import type { Session } from "@supabase/supabase-js";
 import {
   type AppState, type Estimate, type EstimateItem, type EstimatePlace, type Invoice,
   createId, estimateTotals, initialState, invoiceTotal, itemLabor, itemMaterial, itemTotal, money,
 } from "./lib/domain";
-import { isRemoteDataConfigured, loadRemoteAppState, saveRemoteAppState } from "./lib/data-client";
-import { getSupabaseBrowserClient, isSupabaseConfigured } from "./lib/supabase";
-import { deleteCompanyFromSupabase, deleteCustomerFromSupabase, deleteEstimateFromSupabase, deleteInvoiceFromSupabase, deleteMaterialTemplateFromSupabase, deletePlaceTemplateFromSupabase, deleteWorkItemFromSupabase, hasRemoteSeedData } from "./lib/supabase-data";
+import { deleteRemoteRecord, isRemoteDataConfigured, loadRemoteAppState, saveRemoteAppState } from "./lib/data-client";
+import {
+  type AppSession,
+  confirmPasswordReset,
+  getCurrentSession,
+  loginWithPassword,
+  logout,
+  requestPasswordReset,
+} from "./lib/auth-client";
 
 type View = "dashboard" | "estimates" | "editor" | "invoices" | "invoicePreview" | "masters";
 const today = () => new Date().toISOString().slice(0, 10);
@@ -29,15 +34,19 @@ const normalizeState = (value: AppState): AppState => ({
 });
 const storageKey = "endo-estimate-demo-state-v1";
 const passwordRecoveryKey = "endo-password-recovery-pending";
+const hasRemoteSeedData = (value: AppState) => (
+  value.companies.length > 0
+  || value.customers.length > 0
+  || value.workItems.length > 0
+  || value.placeTemplates.length > 0
+  || value.estimates.length > 0
+  || value.invoices.length > 0
+);
 const isPasswordRecoveryUrl = () => {
   if (typeof window === "undefined") return false;
   const params = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   return params.get("password_recovery") === "1"
-    || params.has("code")
-    || params.get("type") === "recovery"
-    || hashParams.get("type") === "recovery"
-    || hashParams.has("access_token");
+    && params.has("token");
 };
 
 function Icon({ name }: { name: string }) {
@@ -51,67 +60,41 @@ export default function EstimateApp() {
   const [editing, setEditing] = useState<Estimate | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
-  const [session, setSession] = useState<Session | null>(null);
-  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [session, setSession] = useState<AppSession | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(() => isPasswordRecoveryUrl());
   const [notice, setNotice] = useState("");
   const [masterTab, setMasterTab] = useState("顧客マスタ");
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
-
-    const supabase = getSupabaseBrowserClient();
-    if (!isPasswordRecoveryUrl()) {
+    let active = true;
+    const recovery = isPasswordRecoveryUrl();
+    if (recovery) {
+      window.localStorage.setItem(passwordRecoveryKey, "1");
+    } else {
       window.localStorage.removeItem(passwordRecoveryKey);
     }
-    const shouldOpenRecovery = () => isPasswordRecoveryUrl();
-    const markRecoveryIfNeeded = (nextSession: Session | null) => {
-      if (nextSession && shouldOpenRecovery()) {
-        setPasswordRecovery(true);
-        window.localStorage.setItem(passwordRecoveryKey, "1");
-        if (window.location.search || window.location.hash) {
-          window.history.replaceState(null, "", window.location.pathname);
-        }
-      } else if (!shouldOpenRecovery()) {
-        window.localStorage.removeItem(passwordRecoveryKey);
-      }
-    };
-    void supabase.auth.getSession().then(async ({ data }) => {
-      if (data.session) {
-        const { error } = await supabase.auth.getUser(data.session.access_token);
-        if (error) {
-          await supabase.auth.signOut();
-          setSession(null);
-          setAuthReady(true);
-          setLoading(false);
-          return;
-        }
-      }
-      setSession(data.session);
-      markRecoveryIfNeeded(data.session);
-      setAuthReady(true);
-      if (!data.session) setLoading(false);
-    });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession);
-      setAuthReady(true);
-      if (event === "PASSWORD_RECOVERY" || shouldOpenRecovery()) {
-        setPasswordRecovery(Boolean(nextSession));
-        window.localStorage.setItem(passwordRecoveryKey, "1");
-      } else if (event === "SIGNED_IN") {
-        setPasswordRecovery(false);
-        window.localStorage.removeItem(passwordRecoveryKey);
-      }
-      if (!nextSession) setLoading(false);
-    });
+    void getCurrentSession()
+      .then(({ session: currentSession }) => {
+        if (!active) return;
+        setSession(currentSession);
+        setAuthReady(true);
+        if (!currentSession) setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSession(null);
+        setAuthReady(true);
+        setLoading(false);
+      });
 
-    return () => listener.subscription.unsubscribe();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (isSupabaseConfigured && !session) return;
+    if (!session) return;
 
     let active = true;
     const timer = window.setTimeout(async () => {
@@ -129,7 +112,7 @@ export default function EstimateApp() {
         const saved = window.localStorage.getItem(storageKey);
         if (active && saved) setState(normalizeState(JSON.parse(saved) as AppState));
       } catch {
-        if (active) setNotice("Supabaseから読み込めなかったため、ローカルデータで開始しました");
+        if (active) setNotice("PostgreSQLから読み込めなかったため、ローカルデータで開始しました");
       } finally {
         if (active) setLoading(false);
       }
@@ -155,8 +138,9 @@ export default function EstimateApp() {
   };
 
   const signOut = async () => {
-    if (!isSupabaseConfigured) return;
-    await getSupabaseBrowserClient().auth.signOut();
+    await logout();
+    setSession(null);
+    setLoading(false);
     setState(initialState);
     setView("dashboard");
     setNotice("");
@@ -189,18 +173,19 @@ export default function EstimateApp() {
     const items = estimate.places.flatMap((place) => place.items.map((item) => ({ name: `${place.name} / ${item.name}`, quantity: item.quantity, unit: item.unit, amount: itemTotal(item) })));
     const completedEstimate = { ...estimate, status: "completed" as const, updatedAt: today() };
     const existsInvoice = state.invoices.some((invoice) => invoice.estimateId === estimate.id);
-    const invoice = existsInvoice ? undefined : {
+    const createInvoice = (): Invoice => ({
       id: createId("in"), invoiceNo: `INV-2026-${String(state.invoices.length + 1).padStart(3, "0")}`,
       estimateId: estimate.id, estimateNo: estimate.estimateNo, showEstimateNo: true, customerId: estimate.customerId,
       companyName: estimate.customerName, projectName: estimate.projectName, issueDate, dueDate: addDays(issueDate, state.settings.paymentDueDays),
       amount: total, status: "draft" as const,
       items,
-    };
+    });
+    const invoice = existsInvoice ? undefined : createInvoice();
     persist({
       ...state,
       estimates: state.estimates.map((item) => item.id === estimate.id ? completedEstimate : item),
       invoices: invoice ? [invoice, ...state.invoices] : state.invoices,
-    }, invoice ? "見積書を作成済みにし、請求書へ追加しました" : "見積書を作成済みにしました");
+    }, invoice ? "見積書を作成済みにし、請求書を作成しました" : "見積書を作成済みにしました");
     setView("invoices");
   };
 
@@ -208,9 +193,7 @@ export default function EstimateApp() {
     if (!window.confirm(`${estimate.estimateNo} を削除しますか？`)) return;
     const nextInvoices = state.invoices.map((invoice) => invoice.estimateId === estimate.id ? { ...invoice, estimateId: "" } : invoice);
     persist({ ...state, estimates: state.estimates.filter((item) => item.id !== estimate.id), invoices: nextInvoices }, "見積書を削除しました");
-    if (isSupabaseConfigured) {
-      void deleteEstimateFromSupabase(estimate.id).catch(() => setNotice("Supabaseから見積書を削除できませんでした"));
-    }
+    void deleteRemoteRecord("estimate", estimate.id).catch(() => setNotice("PostgreSQLから見積書を削除できませんでした"));
   };
 
   const openInvoicePreview = (invoice: Invoice) => {
@@ -224,21 +207,25 @@ export default function EstimateApp() {
     { id: "invoices", label: "請求書", icon: "invoice" }, { id: "masters", label: "マスタ管理", icon: "master" },
   ];
 
-  if (!authReady || loading && !session && isSupabaseConfigured) {
+  if (!authReady) {
     return <div className="loading">認証状態を確認しています…</div>;
   }
 
-  if (isSupabaseConfigured && !session) {
-    return <LoginScreen />;
-  }
-
-  if (isSupabaseConfigured && session && passwordRecovery) {
+  if (passwordRecovery) {
     return <PasswordResetScreen onDone={async () => {
       setPasswordRecovery(false);
       window.localStorage.removeItem(passwordRecoveryKey);
-      await getSupabaseBrowserClient().auth.signOut();
+      await logout();
       setSession(null);
       setLoading(false);
+      window.history.replaceState(null, "", window.location.pathname);
+    }} />;
+  }
+
+  if (!session) {
+    return <LoginScreen onLoggedIn={(nextSession) => {
+      setSession(nextSession);
+      setLoading(true);
     }} />;
   }
 
@@ -264,7 +251,7 @@ export default function EstimateApp() {
   </div>;
 }
 
-function LoginScreen() {
+function LoginScreen({ onLoggedIn }: { onLoggedIn: (session: AppSession) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -275,18 +262,13 @@ function LoginScreen() {
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    const { error } = await getSupabaseBrowserClient().auth.signInWithPassword({ email, password });
-    if (error) {
-      const text = error.message.toLowerCase();
-      if (text.includes("email not confirmed")) {
-        setMessage("このユーザーはメール確認が完了していません。SupabaseのUsers画面でConfirmしてください。");
-      } else if (text.includes("invalid login credentials")) {
-        setMessage("メールアドレスまたはパスワードが違います。Supabaseに登録した内容を確認してください。");
-      } else {
-        setMessage(`ログインできませんでした: ${error.message}`);
-      }
+    try {
+      const result = await loginWithPassword(email, password);
+      onLoggedIn(result.session);
+    } catch (error) {
+      setMessage(`ログインできませんでした: ${error instanceof Error ? error.message : "入力内容を確認してください。"}`);
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const sendResetEmail = async (event: FormEvent) => {
@@ -294,14 +276,12 @@ function LoginScreen() {
     setLoading(true);
     setMessage("");
     window.localStorage.setItem(passwordRecoveryKey, "1");
-    const { error } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/?password_recovery=1`,
-    });
-    if (error) {
+    try {
+      const result = await requestPasswordReset(email);
+      setMessage(result.message);
+    } catch (error) {
       window.localStorage.removeItem(passwordRecoveryKey);
-      setMessage(`再設定メールを送信できませんでした: ${error.message}`);
-    } else {
-      setMessage("パスワード再設定メールを送信しました。メール内のリンクから新しいパスワードを設定してください。");
+      setMessage(`再設定を開始できませんでした: ${error instanceof Error ? error.message : "サーバー設定を確認してください。"}`);
     }
     setLoading(false);
   };
@@ -332,6 +312,11 @@ function PasswordResetScreen({ onDone }: { onDone: () => Promise<void> }) {
   const updatePassword = async (event: FormEvent) => {
     event.preventDefault();
     setMessage("");
+    const token = new URLSearchParams(window.location.search).get("token") ?? "";
+    if (!token) {
+      setMessage("再設定リンクが無効です。もう一度パスワード再設定を行ってください。");
+      return;
+    }
     if (password.length < 8) {
       setMessage("パスワードは8文字以上で入力してください。");
       return;
@@ -342,9 +327,10 @@ function PasswordResetScreen({ onDone }: { onDone: () => Promise<void> }) {
     }
 
     setLoading(true);
-    const { error } = await getSupabaseBrowserClient().auth.updateUser({ password });
-    if (error) {
-      setMessage(`パスワードを更新できませんでした: ${error.message}`);
+    try {
+      await confirmPasswordReset(token, password);
+    } catch (error) {
+      setMessage(`パスワードを更新できませんでした: ${error instanceof Error ? error.message : "再設定リンクを確認してください。"}`);
       setLoading(false);
       return;
     }
@@ -479,9 +465,7 @@ function InvoiceList({ state, persist, onPreview }: { state: AppState; persist: 
   const deleteInvoice = (invoice: Invoice) => {
     if (!window.confirm(`${invoice.invoiceNo} を削除しますか？`)) return;
     persist({ ...state, invoices: state.invoices.filter((item) => item.id !== invoice.id) }, "請求書を削除しました");
-    if (isSupabaseConfigured) {
-      void deleteInvoiceFromSupabase(invoice.id).catch(() => {});
-    }
+    void deleteRemoteRecord("invoice", invoice.id).catch(() => {});
   };
   const toggleInvoiceStatus = (invoice: Invoice) => {
     persist({
@@ -570,7 +554,7 @@ function parseCsv(text: string) {
   }, {}));
 }
 
-function MasterPanel({ state, persist, tab, setTab, session }: { state: AppState; persist: (s: AppState, m: string) => void; tab: string; setTab: (t: string) => void; session: Session | null }) {
+function MasterPanel({ state, persist, tab, setTab, session }: { state: AppState; persist: (s: AppState, m: string) => void; tab: string; setTab: (t: string) => void; session: AppSession | null }) {
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
@@ -584,9 +568,9 @@ function MasterPanel({ state, persist, tab, setTab, session }: { state: AppState
   const updateCompany = (companyId: string, updates: Partial<AppState["companies"][number]>) => persist({ ...state, companies: state.companies.map((company) => company.id === companyId ? { ...company, ...updates } : company) }, "会社マスタを更新しました");
   const updateCustomer = (customerId: string, updates: Partial<AppState["customers"][number]>) => persist({ ...state, customers: state.customers.map((customer) => customer.id === customerId ? { ...customer, ...updates } : customer) }, "顧客マスタを更新しました");
   const updateWork = (workId: string, updates: Partial<AppState["workItems"][number]>) => persist({ ...state, workItems: state.workItems.map((work) => work.id === workId ? { ...work, ...updates } : work) }, "工事マスタを更新しました");
-  const deleteCompany = (companyId: string, companyName: string) => { if (!window.confirm(`${companyName} を削除しますか？`)) return; persist({ ...state, companies: state.companies.filter((company) => company.id !== companyId) }, "会社を削除しました"); if (isSupabaseConfigured) void deleteCompanyFromSupabase(companyId).catch(() => {}); if (editingCompanyId === companyId) setEditingCompanyId(null); };
-  const deleteCustomer = (customerId: string, customerName: string) => { if (!window.confirm(`${customerName} を削除しますか？`)) return; persist({ ...state, customers: state.customers.filter((customer) => customer.id !== customerId) }, "顧客を削除しました"); if (isSupabaseConfigured) void deleteCustomerFromSupabase(customerId).catch(() => {}); if (editingCustomerId === customerId) setEditingCustomerId(null); };
-  const deleteWork = (workId: string, workName: string) => { if (!window.confirm(`${workName} を削除しますか？`)) return; persist({ ...state, workItems: state.workItems.filter((work) => work.id !== workId) }, "工事項目を削除しました"); if (isSupabaseConfigured) void deleteWorkItemFromSupabase(workId).catch(() => {}); if (editingWorkId === workId) setEditingWorkId(null); };
+  const deleteCompany = (companyId: string, companyName: string) => { if (!window.confirm(`${companyName} を削除しますか？`)) return; persist({ ...state, companies: state.companies.filter((company) => company.id !== companyId) }, "会社を削除しました"); void deleteRemoteRecord("company", companyId).catch(() => {}); if (editingCompanyId === companyId) setEditingCompanyId(null); };
+  const deleteCustomer = (customerId: string, customerName: string) => { if (!window.confirm(`${customerName} を削除しますか？`)) return; persist({ ...state, customers: state.customers.filter((customer) => customer.id !== customerId) }, "顧客を削除しました"); void deleteRemoteRecord("customer", customerId).catch(() => {}); if (editingCustomerId === customerId) setEditingCustomerId(null); };
+  const deleteWork = (workId: string, workName: string) => { if (!window.confirm(`${workName} を削除しますか？`)) return; persist({ ...state, workItems: state.workItems.filter((work) => work.id !== workId) }, "工事項目を削除しました"); void deleteRemoteRecord("workItem", workId).catch(() => {}); if (editingWorkId === workId) setEditingWorkId(null); };
   useEffect(() => {
     if (tab === "ユーザー管理" && !canManageUsers) setTab("会社マスタ");
   }, [canManageUsers, setTab, tab]);
@@ -758,9 +742,7 @@ function PlaceTemplateManager({ state, persist }: { state: AppState; persist: (s
       ...state,
       placeTemplates: state.placeTemplates.filter((template) => template.id !== templateId),
     }, "場所を削除しました");
-    if (isSupabaseConfigured) {
-      void deletePlaceTemplateFromSupabase(templateId).catch(() => {});
-    }
+    void deleteRemoteRecord("placeTemplate", templateId).catch(() => {});
     if (editingTemplateId === templateId) setEditingTemplateId(null);
   };
 
@@ -772,9 +754,7 @@ function PlaceTemplateManager({ state, persist }: { state: AppState; persist: (s
         materials: template.materials.filter((material) => material.id !== materialId),
       } : template),
     }, "必須材料を削除しました");
-    if (isSupabaseConfigured) {
-      void deleteMaterialTemplateFromSupabase(materialId).catch(() => {});
-    }
+    void deleteRemoteRecord("materialTemplate", materialId).catch(() => {});
   };
 
   return <div className="template-editor">
@@ -835,51 +815,15 @@ function UserRegistrationPanel() {
 
   const formatDateTime = (value?: string) => value ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "-";
 
-  const getAccessToken = useCallback(async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: sessionData } = await supabase.auth.getSession();
-    const currentToken = sessionData.session?.access_token;
-    if (currentToken) {
-      const { error } = await supabase.auth.getUser(currentToken);
-      if (!error) return currentToken;
-    }
-
-    const { data: refreshed } = await supabase.auth.refreshSession();
-    const refreshedToken = refreshed.session?.access_token;
-    if (refreshedToken) {
-      const { error } = await supabase.auth.getUser(refreshedToken);
-      if (!error) return refreshedToken;
-    }
-
-    await supabase.auth.signOut();
-    setMessage("セッションが無効です。再ログインしてください。");
-    return undefined;
-  }, []);
-
   const loadUsers = useCallback(async () => {
     setLoadingUsers(true);
     setUsersLoaded(false);
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      setMessage("ログイン状態を確認できませんでした。再ログインしてください。");
-      setLoadingUsers(false);
-      return;
-    }
 
     try {
-      let response = await fetch("/api/users", {
+      const response = await fetch("/api/users", {
         cache: "no-store",
-        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
       });
-      if (response.status === 401) {
-        const retryToken = await getAccessToken();
-        if (retryToken) {
-          response = await fetch("/api/users", {
-            cache: "no-store",
-            headers: { Authorization: `Bearer ${retryToken}` },
-          });
-        }
-      }
 
       const result = await response.json();
       if (!response.ok) {
@@ -894,7 +838,7 @@ function UserRegistrationPanel() {
     } finally {
       setLoadingUsers(false);
     }
-  }, [getAccessToken]);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -908,18 +852,11 @@ function UserRegistrationPanel() {
     setSubmitting(true);
     setMessage("");
 
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      setMessage("ログイン状態を確認できませんでした。再ログインしてください。");
-      setSubmitting(false);
-      return;
-    }
-
     const response = await fetch("/api/users", {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ email, password }),
     });
@@ -940,17 +877,12 @@ function UserRegistrationPanel() {
 
   const setAdmin = async (user: AuthUser, isAdmin: boolean) => {
     setMessage("");
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      setMessage("ログイン状態を確認できませんでした。再ログインしてください。");
-      return;
-    }
 
     const response = await fetch("/api/users", {
       method: "PATCH",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ userId: user.id, isAdmin }),
     });
@@ -967,17 +899,12 @@ function UserRegistrationPanel() {
   const deleteUser = async (user: AuthUser) => {
     if (!user.email || !window.confirm(`${user.email} を削除しますか？`)) return;
     setMessage("");
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-      setMessage("ログイン状態を確認できませんでした。再ログインしてください。");
-      return;
-    }
 
     const response = await fetch("/api/users", {
       method: "DELETE",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ userId: user.id }),
     });

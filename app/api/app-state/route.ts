@@ -1,41 +1,24 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import type { AppState } from "../../lib/domain";
-import { loadAppStateFromPostgres, saveAppStateToPostgres } from "../../lib/postgres-data";
 import { isPostgresConfigured } from "../../lib/postgres";
+import { deletePostgresRecord, loadAppStateFromPostgres, saveAppStateToPostgres } from "../../lib/postgres-data";
+import { requireLogin } from "../../lib/auth-server";
 
 export const dynamic = "force-dynamic";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-async function requireLogin(request: Request) {
-  if (!supabaseUrl || !supabasePublishableKey) {
-    return NextResponse.json({ error: "Supabase Auth environment variables are not configured." }, { status: 500 });
+function requirePostgres() {
+  if (!isPostgresConfigured()) {
+    return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 500 });
   }
-
-  const authorization = request.headers.get("authorization");
-  const token = authorization?.replace(/^Bearer\s+/i, "");
-  if (!token) {
-    return NextResponse.json({ error: "Login is required." }, { status: 401 });
-  }
-
-  const supabase = createClient(supabaseUrl, supabasePublishableKey);
-  const { error } = await supabase.auth.getUser(token);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 401 });
-  }
-
   return undefined;
 }
 
 export async function GET(request: Request) {
-  if (!isPostgresConfigured()) {
-    return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 500 });
-  }
+  const configError = requirePostgres();
+  if (configError) return configError;
 
-  const authError = await requireLogin(request);
-  if (authError) return authError;
+  const auth = await requireLogin(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const state = await loadAppStateFromPostgres();
@@ -49,12 +32,11 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  if (!isPostgresConfigured()) {
-    return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 500 });
-  }
+  const configError = requirePostgres();
+  if (configError) return configError;
 
-  const authError = await requireLogin(request);
-  if (authError) return authError;
+  const auth = await requireLogin(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const state = await request.json() as AppState;
@@ -64,6 +46,31 @@ export async function PUT(request: Request) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to save app state." },
       { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  const configError = requirePostgres();
+  if (configError) return configError;
+
+  const auth = await requireLogin(request);
+  if ("error" in auth) return auth.error;
+
+  const url = new URL(request.url);
+  const kind = url.searchParams.get("kind");
+  const id = url.searchParams.get("id");
+  if (!kind || !id) {
+    return NextResponse.json({ error: "Delete kind and id are required." }, { status: 400 });
+  }
+
+  try {
+    await deletePostgresRecord(kind, id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete record." },
+      { status: 400 },
     );
   }
 }

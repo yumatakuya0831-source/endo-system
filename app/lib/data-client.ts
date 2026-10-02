@@ -1,49 +1,39 @@
 import type { AppState } from "./domain";
-import { getSupabaseBrowserClient, isSupabaseConfigured } from "./supabase";
-import { loadAppStateFromSupabase, saveAppStateToSupabase } from "./supabase-data";
 
-export const dataBackend = process.env.NEXT_PUBLIC_DATA_BACKEND === "postgres" ? "postgres" : "supabase";
-export const isRemoteDataConfigured = isSupabaseConfigured;
+export const dataBackend = "postgres";
+export const isRemoteDataConfigured = true;
 
-async function getAccessToken() {
-  const { data } = await getSupabaseBrowserClient().auth.getSession();
-  return data.session?.access_token;
+async function readJson<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error ?? fallbackMessage);
+  }
+  return result as T;
 }
 
 export async function loadRemoteAppState(): Promise<AppState> {
-  if (dataBackend !== "postgres") {
-    return loadAppStateFromSupabase();
-  }
-
-  const accessToken = await getAccessToken();
   const response = await fetch("/api/app-state", {
     cache: "no-store",
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    credentials: "include",
   });
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error ?? "PostgreSQLからデータを読み込めませんでした。");
-  }
-  return result as AppState;
+  return readJson<AppState>(response, "PostgreSQLからデータを読み込めませんでした。");
 }
 
 export async function saveRemoteAppState(state: AppState): Promise<void> {
-  if (dataBackend !== "postgres") {
-    await saveAppStateToSupabase(state);
-    return;
-  }
-
-  const accessToken = await getAccessToken();
   const response = await fetch("/api/app-state", {
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(state),
   });
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error ?? "PostgreSQLへデータを保存できませんでした。");
-  }
+  await readJson<{ ok: boolean }>(response, "PostgreSQLへデータを保存できませんでした。");
+}
+
+export async function deleteRemoteRecord(kind: string, id: string): Promise<void> {
+  const params = new URLSearchParams({ kind, id });
+  const response = await fetch(`/api/app-state?${params.toString()}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  await readJson<{ ok: boolean }>(response, "PostgreSQLからデータを削除できませんでした。");
 }

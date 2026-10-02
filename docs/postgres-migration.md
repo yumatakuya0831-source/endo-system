@@ -1,7 +1,7 @@
-# PostgreSQLへの切り替え
+# PostgreSQLへの完全移行
 
-SupabaseのDBはPostgreSQLですが、このアプリではSupabase JS経由でデータを読み書きしていました。
-`NEXT_PUBLIC_DATA_BACKEND=postgres` にすると、業務データはNext.js API経由で通常のPostgreSQLへ保存します。
+このアプリは、業務データとログインユーザーを通常のPostgreSQLに保存します。
+SupabaseのURL、publishable key、service role keyは通常運用では不要です。
 
 ## 1. テーブル作成
 
@@ -11,28 +11,26 @@ PostgreSQLに接続して、次のSQLを実行します。
 psql "$DATABASE_URL" -f postgres/schema.sql
 ```
 
+既存DBに追加で適用する場合も同じSQLを実行できます。`if not exists` を使っているため、既存テーブルは保持されます。
+
 ## 2. 環境変数
 
-`.env.local` に追加します。
+`.env.local` に設定します。
 
 ```env
-NEXT_PUBLIC_DATA_BACKEND=postgres
 DATABASE_URL=postgresql://user:password@localhost:5432/endo_system
 POSTGRES_SSL=disable
+ADMIN_EMAILS=yumatakuya0831@gmail.com
+NEXT_PUBLIC_ADMIN_EMAILS=yumatakuya0831@gmail.com
+ADMIN_INITIAL_PASSWORD=本番では必ず長い初期パスワード
 ```
 
-ログインとユーザー管理は現在のSupabase Authを使います。以下は引き続き必要です。
+`ADMIN_EMAILS` に含まれるメールアドレスで、まだユーザーが存在しない場合だけ、`ADMIN_INITIAL_PASSWORD` で初回ログインすると管理者ユーザーを自動作成します。
+作成後はユーザー管理画面から通常のユーザー登録・管理者権限切替・削除ができます。
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-ADMIN_EMAILS=
-NEXT_PUBLIC_ADMIN_EMAILS=
-```
+## 3. 範囲
 
-## 現時点の範囲
-
-- 顧客、工事、見積、請求、設定などの業務データをPostgreSQLへ保存できます。
-- 認証、パスワード再設定、ユーザー管理はSupabase Authを継続利用します。
-- 削除同期は安全のため一括削除ではなく、今後個別APIで対応する想定です。
+- 顧客、工事、見積、請求、汎用マスタ、設定はPostgreSQLへ保存します。
+- ログイン、ログアウト、ユーザー管理もPostgreSQLの `app_users` と `app_user_sessions` を使います。
+- パスワード再設定トークンは `password_reset_tokens` に保存します。
+- パスワード再設定メールの送信は、SMTPやメール配信サービスの設定を追加してから有効化します。

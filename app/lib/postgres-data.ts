@@ -232,3 +232,33 @@ export async function saveAppStateToPostgres(state: AppState): Promise<void> {
     client.release();
   }
 }
+
+const deleteStatements: Record<string, string> = {
+  company: "delete from companies where id = $1",
+  customer: "delete from customers where id = $1",
+  workItem: "delete from work_items where id = $1",
+  placeTemplate: "delete from place_templates where id = $1",
+  materialTemplate: "delete from material_templates where id = $1",
+  invoice: "delete from invoices where id = $1",
+};
+
+export async function deletePostgresRecord(kind: string, id: string): Promise<void> {
+  const client = await getPostgresPool().connect();
+  try {
+    await client.query("begin");
+    if (kind === "estimate") {
+      await client.query("update invoices set estimate_id = null where estimate_id = $1", [id]);
+      await client.query("delete from estimates where id = $1", [id]);
+    } else {
+      const statement = deleteStatements[kind];
+      if (!statement) throw new Error("Unsupported delete kind.");
+      await client.query(statement, [id]);
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

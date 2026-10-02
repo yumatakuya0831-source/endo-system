@@ -114,11 +114,41 @@ create table if not exists app_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists app_users (
+  id text primary key,
+  email text not null unique,
+  password_hash text not null,
+  role text not null default 'user' check (role in ('admin', 'user')),
+  confirmed_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_sign_in_at timestamptz
+);
+
+create table if not exists app_user_sessions (
+  id text primary key,
+  user_id text not null references app_users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists password_reset_tokens (
+  id text primary key,
+  user_id text not null references app_users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists material_templates_place_template_id_idx on material_templates(place_template_id);
 create index if not exists estimate_places_estimate_id_idx on estimate_places(estimate_id);
 create index if not exists estimate_items_estimate_place_id_idx on estimate_items(estimate_place_id);
 create index if not exists invoices_estimate_id_idx on invoices(estimate_id);
 create index if not exists invoice_items_invoice_id_idx on invoice_items(invoice_id);
+create index if not exists app_user_sessions_user_id_idx on app_user_sessions(user_id);
+create index if not exists password_reset_tokens_user_id_idx on password_reset_tokens(user_id);
 
 insert into app_settings (id, payment_due_days, profit_rate)
 values ('default', 30, 20)
