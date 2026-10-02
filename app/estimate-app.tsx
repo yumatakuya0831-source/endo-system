@@ -6,8 +6,9 @@ import {
   type AppState, type Estimate, type EstimateItem, type EstimatePlace, type Invoice,
   createId, estimateTotals, initialState, invoiceTotal, itemLabor, itemMaterial, itemTotal, money,
 } from "./lib/domain";
+import { isRemoteDataConfigured, loadRemoteAppState, saveRemoteAppState } from "./lib/data-client";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "./lib/supabase";
-import { deleteCompanyFromSupabase, deleteCustomerFromSupabase, deleteEstimateFromSupabase, deleteInvoiceFromSupabase, deleteMaterialTemplateFromSupabase, deletePlaceTemplateFromSupabase, deleteWorkItemFromSupabase, hasRemoteSeedData, loadAppStateFromSupabase, saveAppStateToSupabase } from "./lib/supabase-data";
+import { deleteCompanyFromSupabase, deleteCustomerFromSupabase, deleteEstimateFromSupabase, deleteInvoiceFromSupabase, deleteMaterialTemplateFromSupabase, deletePlaceTemplateFromSupabase, deleteWorkItemFromSupabase, hasRemoteSeedData } from "./lib/supabase-data";
 
 type View = "dashboard" | "estimates" | "editor" | "invoices" | "invoicePreview" | "masters";
 const today = () => new Date().toISOString().slice(0, 10);
@@ -115,8 +116,8 @@ export default function EstimateApp() {
     let active = true;
     const timer = window.setTimeout(async () => {
       try {
-        if (isSupabaseConfigured) {
-          const remoteState = await loadAppStateFromSupabase();
+        if (isRemoteDataConfigured) {
+          const remoteState = await loadRemoteAppState();
           if (active && hasRemoteSeedData(remoteState)) {
             const normalized = normalizeState(remoteState);
             setState(normalized);
@@ -145,9 +146,9 @@ export default function EstimateApp() {
       window.localStorage.setItem(storageKey, JSON.stringify(next));
       setNotice(message);
     } catch { setNotice("保存できませんでした。もう一度お試しください"); }
-    if (isSupabaseConfigured) {
-      void saveAppStateToSupabase(next).catch(() => {
-        setNotice("Supabaseへ保存できませんでした。ローカルには保存済みです");
+    if (isRemoteDataConfigured) {
+      void saveRemoteAppState(next).catch(() => {
+        setNotice("リモートDBへ保存できませんでした。ローカルには保存済みです");
       });
     }
     window.setTimeout(() => setNotice(""), 2600);
