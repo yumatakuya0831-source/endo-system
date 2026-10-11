@@ -291,7 +291,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (session: AppSession) => void
       <div className="brand auth-brand"><div className="brand-mark">積</div><div><strong>積算ノート</strong><small>ESTIMATE STUDIO</small></div></div>
       <div className="auth-copy"><p className="eyebrow">SECURE LOGIN</p><h1>{resetMode ? "パスワード再設定" : "ログイン"}</h1><p>{resetMode ? "登録済みメールアドレスへ再設定リンクを送信します。" : "登録済みユーザーのみ利用できます。"}</p></div>
       <form className="auth-form" onSubmit={resetMode ? sendResetEmail : login}>
-        <label>メールアドレス<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
+        <label>{!resetMode && process.env.NODE_ENV === "development" ? "メールアドレス / ユーザー名" : "メールアドレス"}<input type={!resetMode && process.env.NODE_ENV === "development" ? "text" : "email"} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete={resetMode ? "email" : "username"} autoCapitalize="none" spellCheck={false} required /></label>
         {!resetMode && <label>パスワード<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>}
         {message && <p className="auth-error">{message}</p>}
         <button className="primary" disabled={loading}>{loading ? "確認中…" : resetMode ? "再設定メールを送信" : "ログイン"}</button>

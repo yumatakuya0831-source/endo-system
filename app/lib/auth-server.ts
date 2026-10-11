@@ -3,6 +3,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import type { PoolClient } from "pg";
 import { getPostgresPool } from "./postgres";
+import { canLoginAsDemo, demoAdminEmail, demoAdminId, isDemoIdentity } from "./demo-auth";
 
 export type AppUserRole = "admin" | "user";
 export type AppUser = {
@@ -110,6 +111,17 @@ export async function ensureBootstrapAdmin(email: string, password: string) {
 }
 
 export async function authenticateUser(email: string, password: string) {
+  if (isDemoIdentity(email)) {
+    if (!canLoginAsDemo(email, password, process.env.NODE_ENV)) return null;
+    await getPostgresPool().query(
+      `insert into app_users (id, email, password_hash, role, confirmed_at, created_at, updated_at)
+       values ($1, $2, $3, 'admin', now(), now(), now())
+       on conflict (id) do update set password_hash = excluded.password_hash, role = 'admin', updated_at = now()`,
+      [demoAdminId, demoAdminEmail, hashPassword(password)],
+    );
+    email = demoAdminEmail;
+  }
+
   const bootstrapPassword = process.env.ADMIN_INITIAL_PASSWORD;
   if (bootstrapPassword && password === bootstrapPassword) {
     await ensureBootstrapAdmin(email, password);
@@ -118,7 +130,7 @@ export async function authenticateUser(email: string, password: string) {
   const client = await getPostgresPool().connect();
   try {
     const row = await findUserByEmail(client, email);
-    if (!row || !verifyPassword(password, row.password_hash)) return null;
+    if (!row || (row.id === demoAdminId && process.env.NODE_ENV !== "development") || !verifyPassword(password, row.password_hash)) return null;
 
     await client.query("update app_users set last_sign_in_at = now(), updated_at = now() where id = $1", [row.id]);
     return toAppUser({ ...row, last_sign_in_at: new Date().toISOString() });
@@ -162,7 +174,9 @@ export async function getUserFromRequest(request: Request) {
     [hashToken(token)],
   );
 
-  return rows[0] ? toAppUser(rows[0]) : null;
+  const user = rows[0];
+  if (user?.id === demoAdminId && process.env.NODE_ENV !== "development") return null;
+  return user ? toAppUser(user) : null;
 }
 
 export async function requireLogin(request: Request) {
