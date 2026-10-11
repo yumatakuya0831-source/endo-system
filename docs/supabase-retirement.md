@@ -62,6 +62,7 @@ VercelのProductionに本番DBの `DATABASE_URL` を設定する。ローカル�
 - 証跡: `.local-postgres/production-transfers/2026-10-11T12-42-04-992Z/report.json`。移行元スナップショットと移行先の事前状態も同フォルダーに保存。秘密情報や個人情報はGitへ追加しない。
 - 移行後の本番APIはHTTP 500、`DATABASE_URL is not configured`。新しい環境変数を反映する再デプロイが必要。
 - CLIの現在の認証には対象チームへのアクセスがなく、自動で再デプロイを実行できない。GitHub pushによる自動デプロイの確認、またはユーザーによるダッシュボードの再デプロイが必要。
+- 記録のpush後、同じ本番APIはHTTP 401、`Login is required`へ変化。未認証時の正常な拒否を確認した。DB未設定エラーは解消したが、これだけでは認証後のDB読み取り成功は証明しない。ユーザーによる本番ログインと業務データ表示の確認を待つ。
 
 ## パスワードの再設定
 
