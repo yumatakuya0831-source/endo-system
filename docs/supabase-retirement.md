@@ -66,6 +66,13 @@ VercelのProductionに本番DBの `DATABASE_URL` を設定する。ローカル�
 
 ## パスワードの再設定
 
+FR-023 / AC-037の追加適用: ユーザーが指定した移行済みアカウント1名の本番パスワードをPC上の非表示入力で再設定する。本番DB設定は `.env.production.local`、APIは固定の `https://endo-system.vercel.app` を使用し、他ユーザーとローカルDBは変更しない。成功時は本番APIでログイン・ログアウトを検証する。パスワードと再設定トークンは保存・出力しない。
+
+FR-028 / AC-042: 指定メールアドレスが未登録だったため、ユーザーの追加承認に基づき、本番に新規管理者を1名登録する。権限はユーザーの明示指定でadmin。既存ユーザーの上書きは拒否し、8文字以上のパスワードをPC上で非表示入力・確認する。`create-production-admin.mjs` と `reset-migrated-users.ps1 -Production -CreateAdmin -Email <指定メール>` を使用。本番ログイン・管理者権限・業務API取得・ログアウトを検証し、秘密値を含まない証跡だけをGit管理対象外へ保存する。入力完了まで実登録は未完了。
+
+- T-015 / FR-028 / AC-042: 本番DBで指定メールが未登録であることを読み取り確認。既存移行ユーザーは2名。対話ウィンドウを起動し、パスワード入力待ち。
+- 自動テスト5件、lint、PowerShell構文検査、本番ビルドは合格。実登録・ログイン・業務APIアクセスは入力完了後に検証するため、現時点では未実施。
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/reset-migrated-users.ps1
 ```
