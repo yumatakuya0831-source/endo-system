@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+.local-postgres/
 
 # Keep the shareable environment-variable template
 !.env.example

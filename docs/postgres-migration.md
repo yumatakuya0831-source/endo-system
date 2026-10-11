@@ -3,6 +3,35 @@
 このアプリは、業務データとログインユーザーを通常のPostgreSQLに保存します。
 SupabaseのURL、publishable key、service role keyは通常運用では不要です。
 
+## Windowsでのローカル接続設定
+
+### 既存PostgreSQLのパスワードが不明な場合
+
+インストール済みPostgreSQLのバイナリを使って、既存サービスとは別の開発用DBを作成できます。
+
+```powershell
+npm run db:setup
+```
+
+接続先は `127.0.0.1:5433`、DB名は `endo_system_dev`、アプリ用ユーザーは `endo_app_dev` です。
+DBファイルと管理用の認証情報はGit管理対象外の `.local-postgres/` に保存し、アプリの接続設定は `.env.local` に保存します。
+この操作は既存の5432ポートのPostgreSQLと既存データを変更しません。新しいDBに旧データは取り込まれません。
+PCを再起動した後は `npm run db:start` で専用DBを起動します。停止は `npm run db:stop` です。
+初回設定後、`npm run dev` で開発サーバーを起動し、`admin / admin` でログインできます。
+
+### 既存PostgreSQLのパスワードが分かる場合
+
+PostgreSQLが `127.0.0.1:5432` で起動している場合、リポジトリで次を実行します。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup-postgres.ps1
+```
+
+管理ユーザー `postgres` のパスワードを画面で入力します。パスワードは非表示で入力され、コマンド引数やログに出力されません。
+専用DB `endo_system_dev` と専用ユーザー `endo_app_dev` を新規作成し、スキーマを適用します。アプリ用パスワードはランダムに生成し、Git管理対象外の `.env.local` に接続設定を保存します。
+同名のDBまたはユーザーが存在する場合は停止します。既存データや既存ユーザーのパスワードを上書きしません。
+設定後は開発サーバーを再起動してください。既存Supabaseの業務データはこの手順では移行しません。
+
 ## 1. テーブル作成
 
 PostgreSQLに接続して、次のSQLを実行します。
