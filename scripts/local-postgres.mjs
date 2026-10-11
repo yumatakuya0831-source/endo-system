@@ -11,15 +11,22 @@ const dataDir = path.join(localDir, "data");
 const configPath = path.join(localDir, "config.json");
 const port = 5433;
 
-function run(command, args, env = process.env) {
+function run(command, args, env = process.env, { allowedExitCodes = [0], stdio = "inherit" } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: root, env, windowsHide: true, stdio: "inherit" });
+    const child = spawn(command, args, { cwd: root, env, windowsHide: true, stdio });
     child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${path.basename(command)} exited with code ${code}`)));
+    child.once("exit", (code) => allowedExitCodes.includes(code) ? resolve(code) : reject(new Error(`${path.basename(command)} exited with code ${code}`)));
   });
 }
 
 async function start(config) {
+  const status = await run(path.join(config.binDir, "pg_ctl.exe"), ["-D", dataDir, "status"], process.env, {
+    allowedExitCodes: [0, 3], stdio: "ignore",
+  });
+  if (status === 0) {
+    console.log(`PostgreSQLはすでに起動しています（127.0.0.1:${config.port}）。`);
+    return;
+  }
   await run(path.join(config.binDir, "pg_ctl.exe"), [
     "-D", dataDir, "-l", path.join(localDir, "postgres.log"), "-w", "-t", "30",
     "-o", `-h 127.0.0.1 -p ${config.port}`, "start",
