@@ -21,7 +21,7 @@ node --env-file=.env.local scripts/transfer-postgres.mjs --apply
 本番データがまだ入っていないDBを使用する。アプリ用のテーブル作成とデータ書き込みは同一トランザクションで行う。
 移行用のデータとレポートは `.local-postgres/production-transfers/` に保存し、Gitには含めない。
 VercelのProductionに本番DBの `DATABASE_URL` を設定する。ローカル用の `POSTGRES_SSL=disable` は本番に設定しない。`APP_ORIGIN` は本番URLを使う。
-外部DBの作成と本番接続テストは未実施。Vercel管理画面へのログインが必要。
+外部DBはNeonの `endo-system-db` をSingapore、Free、Auth無効で作成済み。ユーザーがVercelの `endo-system` のProductionに接続し、非公開の `.env.production.local` に接続設定を保存した。本番アプリの再デプロイと接続テストは未完了。
 
 ## 状況
 
@@ -29,7 +29,7 @@ VercelのProductionに本番DBの `DATABASE_URL` を設定する。ローカル�
 - AC-038: 未完了。本番 `https://endo-system.vercel.app/api/app-state` はHTTP 500、`DATABASE_URL is not configured` を返す。接続可能な本番DBが必要。
 - AC-037: 完了。ユーザーの非表示入力により2名のパスワードを再設定し、再設定APIとログインAPIで成功を確認。検証セッションはログアウト済み。新しいパスワードは記録しない。成功証跡はGit管理対象外の `.local-postgres/reset-<ユーザーID>.json` に保存。
 - AC-039: 完了。ユーザー指定のPC内別フォルダーへ最新バックアップを保存し、SHA256の一致を確認。復元試験も完了。
-- AC-041: 進行中。ローカルの独立DBで移行処理を検証済み。外部DBへの実移行と本番照合は未実施。
+- AC-041: 完了。Neonの外部DBへ業務データ35件と登録ユーザー2名を移行し、全12移行対象テーブルの全行一致を確認。パスワードハッシュを含めて一致。開発用デモ管理者、セッション、再設定トークンは移していない。
 - 本番のVercelプロジェクトは、現在ログインしている `yoshida0522s-projects` のスコープでは見つからない。既存本番環境の所有アカウントへのアクセスが必要。
 - 所有プロジェクトは `yumatakuya0831-sources-projects/endo-system`。ユーザーが提示したDBはPC内の開発用DBだったため、外部PostgreSQLを用意する方針へ変更。Vercel MarketplaceのNeon Freeプランを候補とし、有料プランは承認対象外。
 - ブラウザ確認中にGoogle認証画面へのアクセスが自動承認審査で拒否された。別経路で認証を回避せず、ユーザーによるVercelログインと外部DB作成を待つ。
@@ -52,7 +52,16 @@ VercelのProductionに本番DBの `DATABASE_URL` を設定する。ローカル�
 - 元DBの同一スナップショットからバックアップと期待値を取得し、14テーブルの全行を復元後と照合して一致。
 - 同フォルダーに `verification.json` と旧Supabaseの `supabase-source.json` を保存。顧客情報とユーザー情報を含むためGit管理対象外。
 - 別保存先: `C:\Users\kanta\ENDO-backups\2026-10-11T12-03-40-127Z\`。3ファイルのSHA256が元ファイルと一致。ユーザーの「このPC内の別フォルダー」指定に基づく保存であり、別端末やクラウドへの転送は行っていない。
-- 外部PostgreSQLの作成とVercel側の本番設定は未完了。完了後に実移行、再デプロイ、登録ユーザーの本番ログインと業務データ照合を行う。
+- 外部PostgreSQLの作成・Productionへの連携・データ移行は完了。再デプロイ、登録ユーザーの本番ログインとアプリ経由の業務データ照合は未完了。
+
+## 外部DBへの実移行結果
+
+- `node --env-file=.env.local scripts/transfer-postgres.mjs`: 終了コード0、`ready`。新規の移行先が空であることを確認。
+- `node --env-file=.env.local scripts/transfer-postgres.mjs --apply`: 終了コード0、`success`。全12移行対象テーブルのJSON全行照合に成功し、トランザクションをコミット。
+- 件数: 会社1、顧客3、工事項目5、場所4、材料7、見積2、見積場所3、見積明細7、請求1、請求明細1、設定1、登録ユーザー2。
+- 証跡: `.local-postgres/production-transfers/2026-10-11T12-42-04-992Z/report.json`。移行元スナップショットと移行先の事前状態も同フォルダーに保存。秘密情報や個人情報はGitへ追加しない。
+- 移行後の本番APIはHTTP 500、`DATABASE_URL is not configured`。新しい環境変数を反映する再デプロイが必要。
+- CLIの現在の認証には対象チームへのアクセスがなく、自動で再デプロイを実行できない。GitHub pushによる自動デプロイの確認、またはユーザーによるダッシュボードの再デプロイが必要。
 
 ## パスワードの再設定
 
