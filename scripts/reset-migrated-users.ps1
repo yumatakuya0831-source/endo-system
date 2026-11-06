@@ -20,7 +20,7 @@ try {
     }
     if ($Email) { $taskOptions += @('--email', $Email) }
     $taskUsersJson = & node @taskArgs list @taskOptions
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot read migrated users.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot read the requested account.' }
     $taskUsers = $taskUsersJson | ConvertFrom-Json
     foreach ($taskUser in $taskUsers) {
         Write-Host ('Set a new password for: ' + $taskUser.email)
@@ -45,7 +45,7 @@ try {
             $env:ENDO_RESET_NEW_PASSWORD = $null
         }
     }
-    Write-Host 'All migrated users were reset and verified.'
+    Write-Host 'Account operation completed and verified.'
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
 } finally {

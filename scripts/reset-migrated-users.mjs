@@ -4,12 +4,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
-const migrationDir = fileURLToPath(new URL("../.local-postgres/migrations/", import.meta.url));
-const latest = (await readdir(migrationDir)).sort().at(-1);
-if (!latest) throw new Error("No migration snapshot found.");
-const source = JSON.parse(await readFile(path.join(migrationDir, latest, "source.json"), "utf8"));
-const sourceIds = (source.users ?? []).map((user) => user.id);
-if (!sourceIds.length) throw new Error("No migrated users found.");
+async function readMigratedUserIds() {
+  const migrationDir = fileURLToPath(new URL("../.local-postgres/migrations/", import.meta.url));
+  const latest = (await readdir(migrationDir)).sort().at(-1);
+  if (!latest) throw new Error("No migration snapshot found.");
+  const source = JSON.parse(await readFile(path.join(migrationDir, latest, "source.json"), "utf8"));
+  const ids = (source.users ?? []).map((user) => user.id);
+  if (!ids.length) throw new Error("No migrated users found.");
+  return ids;
+}
 const destination = new URL(process.env.DATABASE_URL);
 const production = process.argv.includes("--production");
 const emailIndex = process.argv.indexOf("--email");
@@ -28,13 +31,15 @@ delete process.env.ENDO_RESET_USER_ID;
 let tokenId;
 try {
   await client.connect();
-  const users = (await client.query("select id, email, role from app_users where id = any($1::text[]) and ($2::text is null or email = $2) order by email", [sourceIds, email ?? null])).rows;
-  if (email && users.length !== 1) throw new Error("The specified migrated user was not found.");
+  const users = production
+    ? (await client.query("select id, email, role from app_users where email = $1 and id <> 'dev-demo-admin' and email <> 'admin@demo.invalid'", [email])).rows
+    : (await client.query("select id, email, role from app_users where id = any($1::text[]) and ($2::text is null or email = $2) order by email", [await readMigratedUserIds(), email ?? null])).rows;
+  if (email && users.length !== 1) throw new Error("The specified user was not found.");
   if (process.argv[2] === "list") {
     console.log(JSON.stringify(users));
   } else if (process.argv[2] === "reset") {
     const user = users.find((item) => item.id === userId);
-    if (!user || !password || password.length < 8) throw new Error("A migrated user and a password of at least 8 characters are required.");
+    if (!user || !password || password.length < 8) throw new Error("A registered user and a password of at least 8 characters are required.");
     const token = randomBytes(32).toString("hex");
     tokenId = `reset-${randomBytes(16).toString("hex")}`;
     await client.query(
