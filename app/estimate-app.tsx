@@ -42,6 +42,22 @@ const hasRemoteSeedData = (value: AppState) => (
   || value.estimates.length > 0
   || value.invoices.length > 0
 );
+// 採番は件数ではなく既存の最大番号+1にする（削除後に番号が重複しないように）。
+const nextDocumentNo = (existing: string[], defaultPrefix: string) => {
+  let max = 0;
+  let prefix = defaultPrefix;
+  for (const no of existing) {
+    const match = /^(.*-)(\d+)$/.exec(no);
+    if (match) {
+      const seq = Number(match[2]);
+      if (seq > max) {
+        max = seq;
+        prefix = match[1].replace(/-$/, "");
+      }
+    }
+  }
+  return `${prefix}-${String(max + 1).padStart(3, "0")}`;
+};
 const isPasswordRecoveryUrl = () => {
   if (typeof window === "undefined") return false;
   const params = new URLSearchParams(window.location.search);
@@ -64,6 +80,15 @@ export default function EstimateApp() {
   const [session, setSession] = useState<AppSession | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(() => isPasswordRecoveryUrl());
   const [notice, setNotice] = useState("");
+  const noticeTimer = useRef<number | undefined>(undefined);
+  // sticky=true の通知は自動で消さない（保存失敗など、見落とすとデータ消失につながる通知用）。
+  const notify = (text: string, sticky = false) => {
+    setNotice(text);
+    window.clearTimeout(noticeTimer.current);
+    if (!sticky) {
+      noticeTimer.current = window.setTimeout(() => setNotice(""), 2600);
+    }
+  };
   const [masterTab, setMasterTab] = useState("顧客マスタ");
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
 
@@ -127,14 +152,23 @@ export default function EstimateApp() {
     setState(next);
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(next));
-      setNotice(message);
-    } catch { setNotice("保存できませんでした。もう一度お試しください"); }
-    if (isRemoteDataConfigured) {
-      void saveRemoteAppState(next).catch(() => {
-        setNotice("リモートDBへ保存できませんでした。ローカルには保存済みです");
-      });
+    } catch {
+      notify("保存できませんでした。もう一度お試しください", true);
+      return;
     }
-    window.setTimeout(() => setNotice(""), 2600);
+    if (isRemoteDataConfigured) {
+      // 成功表示はサーバー保存が完了してから出す。失敗時はサーバーのエラー内容とともに
+      // 消えない通知で知らせる（従来は成功表示の直後に失敗通知が上書き・自動消去され、
+      // 保存できていないことに気づけない状態だった）。
+      void saveRemoteAppState(next)
+        .then(() => notify(message))
+        .catch((error: unknown) => {
+          const detail = error instanceof Error && error.message ? `（${error.message}）` : "";
+          notify(`サーバーへ保存できませんでした${detail}。このままでは再読み込みで消える可能性があります。`, true);
+        });
+    } else {
+      notify(message);
+    }
   };
 
   const signOut = async () => {
@@ -149,7 +183,7 @@ export default function EstimateApp() {
   const openEditor = (estimate?: Estimate) => {
     const customer = state.customers[0];
     setEditing(estimate ? clone(estimate) : {
-      id: createId("es"), estimateNo: `EST-2026-${String(state.estimates.length + 1).padStart(3, "0")}`,
+      id: createId("es"), estimateNo: nextDocumentNo(state.estimates.map((e) => e.estimateNo), "EST-2026"),
       customerId: customer?.id ?? "", customerName: customer?.name ?? "", customerAddress: customer?.address ?? "",
       projectName: "", siteAddress: "", status: "draft", createdAt: today(), updatedAt: today(), places: [],
     });
@@ -174,7 +208,7 @@ export default function EstimateApp() {
     const completedEstimate = { ...estimate, status: "completed" as const, updatedAt: today() };
     const existsInvoice = state.invoices.some((invoice) => invoice.estimateId === estimate.id);
     const createInvoice = (): Invoice => ({
-      id: createId("in"), invoiceNo: `INV-2026-${String(state.invoices.length + 1).padStart(3, "0")}`,
+      id: createId("in"), invoiceNo: nextDocumentNo(state.invoices.map((i) => i.invoiceNo), "INV-2026"),
       estimateId: estimate.id, estimateNo: estimate.estimateNo, showEstimateNo: true, customerId: estimate.customerId,
       companyName: estimate.customerName, projectName: estimate.projectName, issueDate, dueDate: addDays(issueDate, state.settings.paymentDueDays),
       amount: total, status: "draft" as const,
